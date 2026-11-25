@@ -55,6 +55,7 @@ Last updated: 2026-09-29.
 - Added a tested 512 KiB WebSocket audio backpressure limit. When a slow network fills the outbound socket buffer, newly produced audio chunks are dropped and the candidate sees a visible limitation count instead of accumulating stale audio; control messages and reconnect behavior still need their dedicated protocol work.
 - Added a bounded one-node LangGraph workflow to the live suggestion path. It has no autonomous agents or hidden extra model calls; richer evidence selection and graph state remain future gates.
 - Changed default Deepgram utterance logs to source and character-count metadata only; full transcript text is no longer written to the default operational log path.
+- Added an allowlisted, cached model catalog (`OPENROUTER_ALLOWED_MODELS`, authenticated `GET /models`) enriched from OpenRouter's public model list, with unavailable models flagged and `unknown` availability when the lookup fails. The Interview Settings step has an "AI model" picker fed through a narrow `getModels()` preload method; the backend rejects models outside the allowlist with `unsupported_model`. The choice is session-scoped and pinned per generation, and suggestion messages carry additive selected/actual model IDs. Per-model budget pricing, cross-model fallback policy, and in-call model switching UI remain.
 
 ## Latest verification
 

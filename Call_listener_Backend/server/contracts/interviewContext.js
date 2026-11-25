@@ -26,6 +26,9 @@ export const CandidateInterviewContextSchema = z.object({
     stage: z.enum(["recruiter", "technical", "behavioral", "final", "other"])
       .default("other"),
     answerLength: z.enum(["short", "standard", "detailed"]).default("standard"),
+    // Session-scoped model choice. Allowlist membership is enforced by the
+    // message handler because the allowlist is deployment configuration.
+    model: z.string().trim().min(1).max(128).optional(),
   }),
 });
 

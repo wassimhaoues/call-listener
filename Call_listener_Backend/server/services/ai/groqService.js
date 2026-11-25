@@ -10,7 +10,9 @@ export function createGroqReplyGenerator({
   if (!apiKey) throw new TypeError("Groq apiKey is required");
   const client = new GroqClient({ apiKey });
 
-  return async function generateReply(systemPrompt, formattedHistory, { signal } = {}) {
+  // Per-request `model` overrides are OpenRouter-only; the rollback adapter
+  // always uses its configured model.
+  return async function generateReply(systemPrompt, formattedHistory, { signal, onModel } = {}) {
     try {
       log?.info("Generating AI reply from Groq...");
       const response = await client.chat.completions.create(
@@ -24,6 +26,7 @@ export function createGroqReplyGenerator({
         { signal }
       );
       const text = response.choices[0]?.message?.content?.trim() || "";
+      onModel?.({ selected: model, actual: typeof response.model === "string" ? response.model : null });
       log?.info(`Groq reply generated (${text.length} chars)`);
       return text;
     } catch (error) {

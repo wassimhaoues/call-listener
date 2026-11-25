@@ -13,8 +13,8 @@
     "dev": "cross-env NODE_ENV=development node server/index.js",
     "start": "cross-env NODE_ENV=production node server/index.js",
     "lint": "echo \"Linting is not configured yet\" && exit 0",
-    "test": "node --test test/promptBuilder.test.js test/interviewContext.test.js test/interviewWorkflow.test.js test/interviewBudget.test.js test/questionClassifier.test.js test/evidenceSelector.test.js test/deepgramService.test.js test/app.integration.test.js test/websocket.integration.test.js test/messageHandler.test.js test/streamManager.test.js test/sessionStore.test.js test/aiService.test.js test/envConfig.test.js test/dockerConfig.test.js test/frameworkCompatibility.test.js",
-    "test:unit": "node --test test/promptBuilder.test.js test/interviewContext.test.js test/interviewWorkflow.test.js test/interviewBudget.test.js test/questionClassifier.test.js test/evidenceSelector.test.js test/deepgramService.test.js test/messageHandler.test.js test/streamManager.test.js test/sessionStore.test.js test/aiService.test.js",
+    "test": "node --test test/promptBuilder.test.js test/interviewContext.test.js test/interviewWorkflow.test.js test/interviewBudget.test.js test/questionClassifier.test.js test/evidenceSelector.test.js test/deepgramService.test.js test/app.integration.test.js test/websocket.integration.test.js test/messageHandler.test.js test/streamManager.test.js test/sessionStore.test.js test/aiService.test.js test/modelCatalog.test.js test/envConfig.test.js test/dockerConfig.test.js test/frameworkCompatibility.test.js",
+    "test:unit": "node --test test/promptBuilder.test.js test/interviewContext.test.js test/interviewWorkflow.test.js test/interviewBudget.test.js test/questionClassifier.test.js test/evidenceSelector.test.js test/deepgramService.test.js test/messageHandler.test.js test/streamManager.test.js test/sessionStore.test.js test/aiService.test.js test/modelCatalog.test.js",
     "test:integration": "node --test test/app.integration.test.js test/websocket.integration.test.js",
     "test:framework": "node --test test/frameworkCompatibility.test.js"
   },

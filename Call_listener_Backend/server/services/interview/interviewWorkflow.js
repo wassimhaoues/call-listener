@@ -16,6 +16,8 @@ export function createInterviewWorkflow({ buildPrompt, generateReply } = {}) {
     history: Annotation({ default: () => "" }),
     signal: Annotation({ default: () => undefined }),
     onUsage: Annotation({ default: () => undefined }),
+    model: Annotation({ default: () => undefined }),
+    onModel: Annotation({ default: () => undefined }),
     selectedEvidence: Annotation({ default: () => [] }),
     suggestion: Annotation({ default: () => "" }),
   });
@@ -28,6 +30,8 @@ export function createInterviewWorkflow({ buildPrompt, generateReply } = {}) {
       const suggestion = await generateReply(prompt, state.history, {
         signal: state.signal,
         onUsage: state.onUsage,
+        model: state.model,
+        onModel: state.onModel,
       });
       return { suggestion: (suggestion || "").trim() };
     })

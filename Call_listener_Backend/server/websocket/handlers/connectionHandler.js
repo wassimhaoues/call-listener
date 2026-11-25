@@ -22,6 +22,7 @@ const generateReply = createAiReplyGenerator({
   groqModel: CONFIG.GROQ_MODEL,
   openRouterApiKey: CONFIG.OPENROUTER_API_KEY,
   openRouterModel: CONFIG.OPENROUTER_MODEL,
+  openRouterAllowedModels: CONFIG.OPENROUTER_ALLOWED_MODELS,
   openRouterMaxOutputTokens: CONFIG.OPENROUTER_MAX_OUTPUT_TOKENS,
   openRouterRequestTimeoutMs: CONFIG.OPENROUTER_REQUEST_TIMEOUT_MS,
   log: loggers.ai,
@@ -42,6 +43,9 @@ const handleMessage = createMessageHandler({
   buildPrompt,
   parseContext: parseInterviewContext,
   Budget,
+  // Model selection is OpenRouter-only; the Groq rollback adapter rejects any explicit choice.
+  isModelAllowed: (modelId) => CONFIG.AI_PROVIDER === "openrouter" &&
+    CONFIG.OPENROUTER_ALLOWED_MODELS.includes(modelId),
 });
 
 export function handleConnection(wsClient, req, wss) {

@@ -58,6 +58,7 @@ export function createMessageHandler({
   buildPrompt,
   parseContext = (context) => context,
   Budget,
+  isModelAllowed = () => false,
   log = loggers.websocket,
 } = {}) {
   if (!ChatHistory || !ContextStore) {
@@ -78,6 +79,14 @@ export function createMessageHandler({
       if (msg.context) {
         log.info(`📞 Received context for [${sessionId}]`);
         const context = parseContext(msg.context);
+        const selectedModel = context.settings?.model;
+        if (selectedModel !== undefined && !isModelAllowed(selectedModel)) {
+          // Reject rather than silently substituting another model; the
+          // previously stored session context (if any) stays in effect.
+          log.warn(`⚠️ Unsupported model selection rejected for [${sessionId}]`);
+          sendJson(wsClient, { error: "unsupported_model" });
+          return;
+        }
         await ContextStore.set(sessionId, context);
         streamManager.setTranscriptionLanguage?.(
           context.settings?.transcriptionLanguage || context.settings?.language || "fr"
@@ -88,11 +97,16 @@ export function createMessageHandler({
         }
         const systemPrompt = buildPrompt(JSON.stringify(context), "intro");
         const historyStr = await ChatHistory.toPrompt(sessionId);
+        let modelInfo = null;
         const aiReply = await generateReply(systemPrompt, historyStr, {
           onUsage: (usage) => Budget?.recordUsage(sessionId, usage),
+          model: selectedModel,
+          onModel: (info) => { modelInfo = info; },
         });
 
-        if (aiReply) sendJson(wsClient, { ai_reply: aiReply });
+        if (aiReply) {
+          sendJson(wsClient, modelInfo ? { ai_reply: aiReply, model: modelInfo } : { ai_reply: aiReply });
+        }
         return;
       }
 

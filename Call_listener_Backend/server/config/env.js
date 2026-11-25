@@ -1,8 +1,10 @@
 import dotenv from "dotenv";
+import { parseModelAllowlist } from "./modelAllowlist.js";
 
 dotenv.config({ quiet: true });
 
 const AI_PROVIDER = process.env.AI_PROVIDER || "groq";
+const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-5.6-luna";
 const isDevelopment = process.env.NODE_ENV === "development";
 const CONFIG = {
   DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY,
@@ -16,7 +18,12 @@ const CONFIG = {
   GROQ_API_KEY: process.env.GROQ_API_KEY,
   GROQ_MODEL: process.env.GROQ_MODEL || "openai/gpt-oss-120b",
   OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
-  OPENROUTER_MODEL: process.env.OPENROUTER_MODEL || "openai/gpt-5.6-luna",
+  OPENROUTER_MODEL,
+  OPENROUTER_ALLOWED_MODELS: parseModelAllowlist(
+    process.env.OPENROUTER_ALLOWED_MODELS,
+    OPENROUTER_MODEL
+  ),
+  OPENROUTER_CATALOG_TTL_MS: Number(process.env.OPENROUTER_CATALOG_TTL_MS || 10 * 60_000),
   OPENROUTER_MAX_OUTPUT_TOKENS: Number(process.env.OPENROUTER_MAX_OUTPUT_TOKENS || 600),
   OPENROUTER_REQUEST_TIMEOUT_MS: Number(process.env.OPENROUTER_REQUEST_TIMEOUT_MS || 10_000),
   MAX_INTERVIEW_COST_USD: Number(process.env.MAX_INTERVIEW_COST_USD || 5),
@@ -43,6 +50,7 @@ if (!new Set(["groq", "openrouter"]).has(AI_PROVIDER)) {
 for (const key of [
   "OPENROUTER_MAX_OUTPUT_TOKENS",
   "OPENROUTER_REQUEST_TIMEOUT_MS",
+  "OPENROUTER_CATALOG_TTL_MS",
   "MAX_INTERVIEW_COST_USD",
   "OPENROUTER_INPUT_USD_PER_MILLION_TOKENS",
   "OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS",

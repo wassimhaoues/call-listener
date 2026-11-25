@@ -12,7 +12,7 @@ npm ci
 npm run dev
 ```
 
-Create a local `.env` from your secret manager. It must define `DEEPGRAM_API_KEY`, `REDIS_URL`, `APP_ID`, `JWT_SECRET`, and `JWT_TTL_SECONDS`. Set `AI_PROVIDER=groq` with `GROQ_API_KEY`, or set `AI_PROVIDER=openrouter` with `OPENROUTER_API_KEY`. The OpenRouter default is `openai/gpt-5.6-luna`; `GROQ_MODEL` and `OPENROUTER_MODEL` can override the provider model. `PORT` defaults to `4000` (WebSocket) and `EXPRESS_PORT` defaults to `3000` (HTTP). `APP_ID` must equal the desktop app ID (`com.coworky.calllistener`).
+Create a local `.env` from your secret manager. It must define `DEEPGRAM_API_KEY`, `REDIS_URL`, `APP_ID`, `JWT_SECRET`, and `JWT_TTL_SECONDS`. Set `AI_PROVIDER=groq` with `GROQ_API_KEY`, or set `AI_PROVIDER=openrouter` with `OPENROUTER_API_KEY`. The OpenRouter default is `openai/gpt-5.6-luna`; `GROQ_MODEL` and `OPENROUTER_MODEL` can override the provider model. `OPENROUTER_ALLOWED_MODELS` is an optional comma-separated list of OpenRouter model IDs the candidate may pick in the desktop app; it defaults to `OPENROUTER_MODEL` alone and must include it. `OPENROUTER_CATALOG_TTL_MS` (default `600000`) controls how long OpenRouter model availability is cached. `PORT` defaults to `4000` (WebSocket) and `EXPRESS_PORT` defaults to `3000` (HTTP). `APP_ID` must equal the desktop app ID (`com.coworky.calllistener`).
 
 Start Redis before the backend. `GET http://localhost:3000/health` is a liveness check; use `GET http://localhost:3000/ready` for a dependency-aware readiness check.
 

@@ -27,8 +27,49 @@ const emptyCandidate = { name: "", profile: "", skills: [], achievements: [] };
 const emptyJobOffer = { title: "", company: "", description: "", requirements: [] };
 const defaultSettings = { language: "fr", transcriptionLanguage: "fr", stage: "technical", answerLength: "standard" };
 
+function modelLabel(model) {
+  const name = model.name && model.name !== model.id ? `${model.name} (${model.id})` : model.id;
+  if (model.availability === "unavailable") return `${name} — unavailable`;
+  if (model.availability === "unknown") return `${name} — availability unknown`;
+  return name;
+}
+
+function withoutEmptyModel(settings) {
+  const { model, ...rest } = settings;
+  return model ? { ...rest, model } : rest;
+}
+
 function listFromText(text) {
   return text.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function ModelPicker({ catalog, failed, notice, value, onChange }) {
+  const models = catalog?.models || [];
+  const defaultModel = catalog?.defaultModel;
+  return (
+    <div className="mt-1">
+      {models.length > 0 ? (
+        <Labeled id="interviewModel" label="AI model">
+          <select value={value} onChange={(event) => onChange(event.target.value)}>
+            <option value="">{defaultModel ? `Server default (${defaultModel})` : "Server default"}</option>
+            {models.map((model) => (
+              <option key={model.id} value={model.id} disabled={model.availability === "unavailable"}>
+                {modelLabel(model)}
+              </option>
+            ))}
+          </select>
+        </Labeled>
+      ) : (
+        <p className="text-sm text-[var(--text-2)]">
+          {catalog || failed
+            ? "Model selection is not available right now; the server default model will be used."
+            : "Loading available models…"}
+        </p>
+      )}
+      {notice && <p role="status" className="text-sm text-[var(--danger)]">{notice}</p>}
+      <p className="text-xs text-[var(--text-2)]">Used for suggestions in this interview session.</p>
+    </div>
+  );
 }
 
 export default function Context() {
@@ -44,6 +85,9 @@ export default function Context() {
   const [evidence, setEvidence] = useState([]);
   const [brief, setBrief] = useState(null);
   const [legacyContext, setLegacyContext] = useState(null);
+  const [catalog, setCatalog] = useState(null);
+  const [catalogFailed, setCatalogFailed] = useState(false);
+  const [modelNotice, setModelNotice] = useState("");
 
   useEffect(() => {
     const goIfOffline = () => {
@@ -78,6 +122,31 @@ export default function Context() {
     } catch {}
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(window.callApi?.getModels?.())
+      .then((result) => {
+        if (cancelled) return;
+        if (result && Array.isArray(result.models)) setCatalog(result);
+        else setCatalogFailed(true);
+      })
+      .catch(() => {
+        if (!cancelled) setCatalogFailed(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!catalog || !settings.model) return;
+    const saved = catalog.models.find((model) => model.id === settings.model);
+    if (saved && saved.availability !== "unavailable") return;
+    // Make a removed or unavailable choice visible instead of silently swapping models.
+    setModelNotice(saved
+      ? `Your previous model ${settings.model} is currently unavailable. Choose another model.`
+      : `Your previous model ${settings.model} is no longer offered. Choose another model.`);
+    setSettings(({ model: _removed, ...rest }) => rest);
+  }, [catalog, settings.model]);
+
   function start() {
     if (!candidate.name.trim() || !jobOffer.title.trim()) {
       alert("Please provide your name and the job title.");
@@ -97,7 +166,7 @@ export default function Context() {
       candidate: preparedCandidate,
       jobOffer: preparedJobOffer,
       evidence: buildEvidenceReferences(preparedJobOffer.requirements, preparedCandidate),
-      settings,
+      settings: withoutEmptyModel(settings),
     };
     localStorage.setItem("callContext", JSON.stringify(context));
     nav("/conversation");
@@ -216,6 +285,16 @@ export default function Context() {
                     </select>
                   </Labeled>
                 </div>
+                <ModelPicker
+                  catalog={catalog}
+                  failed={catalogFailed}
+                  notice={modelNotice}
+                  value={settings.model || ""}
+                  onChange={(model) => {
+                    setModelNotice("");
+                    setSettings(withoutEmptyModel({ ...settings, model }));
+                  }}
+                />
               </section>
             </div>
           </div>

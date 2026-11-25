@@ -29,6 +29,16 @@ test("validates a bounded candidate and job-offer context", () => {
   );
 });
 
+test("accepts an optional bounded session model choice", () => {
+  const withModel = { ...candidateContext, settings: { ...candidateContext.settings, model: "openai/gpt-5.6-luna" } };
+  assert.equal(parseInterviewContext(withModel).settings.model, "openai/gpt-5.6-luna");
+  assert.equal(parseInterviewContext(candidateContext).settings.model, undefined);
+  assert.throws(
+    () => parseInterviewContext({ ...candidateContext, settings: { ...candidateContext.settings, model: "x".repeat(129) } }),
+    /Too big/
+  );
+});
+
 test("builds an interview prompt grounded in candidate evidence and job details", () => {
   const prompt = buildPrompt(JSON.stringify(candidateContext), "reply");
 

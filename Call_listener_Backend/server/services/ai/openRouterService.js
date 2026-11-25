@@ -32,10 +32,23 @@ function withRequestDeadline(signal, timeoutMs) {
   };
 }
 
-/** Create an OpenRouter/LangChain adapter behind the shared reply contract. */
+function actualModelFrom(response) {
+  const metadata = response?.response_metadata || {};
+  const actual = metadata.model_name || metadata.model;
+  return typeof actual === "string" && actual ? actual.slice(0, 160) : null;
+}
+
+/**
+ * Create an OpenRouter/LangChain adapter behind the shared reply contract.
+ *
+ * `model` is the configured default. A caller may pin a different model per
+ * request with `{ model }`; selections must already be allowlist-validated, and
+ * `allowedModels` (when given) is enforced again here as a defensive check.
+ */
 export function createOpenRouterReplyGenerator({
   apiKey,
   model,
+  allowedModels,
   maxOutputTokens,
   requestTimeoutMs = 10_000,
   ChatOpenRouterClass = ChatOpenRouter,
@@ -46,18 +59,37 @@ export function createOpenRouterReplyGenerator({
   if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
     throw new TypeError("OpenRouter requestTimeoutMs must be a positive number");
   }
-  const client = new ChatOpenRouterClass({ apiKey, model, maxTokens: maxOutputTokens });
+  const allowed = allowedModels ? new Set(allowedModels) : null;
+  const clients = new Map();
+  const clientFor = (modelId) => {
+    if (!clients.has(modelId)) {
+      clients.set(modelId, new ChatOpenRouterClass({ apiKey, model: modelId, maxTokens: maxOutputTokens }));
+    }
+    return clients.get(modelId);
+  };
+  clientFor(model);
 
-  return async function generateReply(systemPrompt, formattedHistory, { signal, onUsage } = {}) {
+  return async function generateReply(
+    systemPrompt,
+    formattedHistory,
+    { signal, onUsage, onModel, model: requestedModel } = {}
+  ) {
+    const selectedModel = requestedModel || model;
+    if (allowed && !allowed.has(selectedModel)) {
+      const error = new Error("OpenRouter unsupported_model");
+      error.code = "unsupported_model";
+      throw error;
+    }
     const deadline = withRequestDeadline(signal, requestTimeoutMs);
     try {
-      log?.info(`Generating AI reply through OpenRouter model ${model}...`);
-      const response = await client.invoke(
+      log?.info(`Generating AI reply through OpenRouter model ${selectedModel}...`);
+      const response = await clientFor(selectedModel).invoke(
         [new SystemMessage(systemPrompt), new HumanMessage(formattedHistory)],
         { signal: deadline.signal }
       );
       const text = contentToText(response.content);
       await onUsage?.(response.usage_metadata || response.response_metadata?.usage);
+      onModel?.({ selected: selectedModel, actual: actualModelFrom(response) });
       log?.info(`OpenRouter reply generated (${text.length} chars)`);
       return text;
     } catch (error) {
