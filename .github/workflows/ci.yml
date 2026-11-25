@@ -124,11 +124,14 @@ jobs:
       - name: Install VB-Cable and start audio services
         run: ./scripts/ci/install-vbcable.ps1 -BinDir bin
       - run: npm ci
+      - name: Download Electron binary
+        run: node node_modules/electron/install.js
       - name: Audio restoration scenarios
         env:
           ELECTRON_RUN_AS_NODE: "1"
         run: |
-          $electron = node -p "require('electron')"
+          $electron = node -p "require('electron')" | Select-Object -Last 1
+          if (-not (Test-Path $electron)) { throw "Electron binary not found: $electron" }
           & $electron scripts/ci/audioRestore.cjs bin/SoundVolumeView.exe ci-audio
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
