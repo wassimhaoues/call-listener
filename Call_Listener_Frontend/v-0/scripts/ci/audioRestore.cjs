@@ -106,9 +106,11 @@ async function runCrashChild(userDataDir) {
   });
   const statePath = path.join(userDataDir, "audio_state.json");
   await waitFor(() => fs.existsSync(statePath), 30000, "child to enable routing");
-  await sleep(1500);
+  await waitFor(() => readListenState() === true, 15000, "listen to turn on in child");
+  const killedAt = Date.now();
   child.kill(); // TerminateProcess on Windows: no cleanup handlers run.
   await new Promise((resolve) => child.once("exit", resolve));
+  return killedAt;
 }
 
 async function crashChildMain() {
@@ -138,23 +140,17 @@ async function main() {
   await scenario("graceful exit restores routing", async () => {
     await mgr.enable();
     assert.equal(fs.existsSync(statePath), true, "pending-restore state written");
-    const listenOn = readListenState();
-    if (listenOn !== null) assert.equal(listenOn, true, "listen enabled while active");
+    await waitFor(() => readListenState() === true, 15000, "listen to turn on");
     await mgr.gracefulExit();
     assert.equal(fs.existsSync(statePath), false, "state file removed");
     assert.equal(await mgr._getDefaultRenderCmdId(), originalDefault);
-    const listenAfter = readListenState();
-    if (listenAfter !== null) assert.equal(listenAfter, false, "listen disabled after exit");
+    assert.equal(readListenState(), false, "listen disabled after exit");
   });
 
   await scenario("watchdog restores routing after a crash", async () => {
-    await runCrashChild(userDataDir);
-    await waitFor(() => readListenState() !== true, 15000, "watchdog to disable listen");
-    const listenAfter = readListenState();
-    if (listenAfter === null) {
-      throw new Error("listen state unreadable; cannot verify watchdog restoration");
-    }
-    assert.equal(listenAfter, false, "watchdog disabled listen");
+    const killedAt = await runCrashChild(userDataDir);
+    await waitFor(() => readListenState() === false, 15000, "watchdog to disable listen");
+    console.log(`watchdog restored listen ${Date.now() - killedAt} ms after crash`);
     assert.equal(await mgr._getDefaultRenderCmdId(), originalDefault);
   });
 
