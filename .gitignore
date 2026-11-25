@@ -28,3 +28,10 @@ graphify-out/
 .DS_Store
 Thumbs.db
 coverage/
+
+# Claude Code agent worktrees
+.claude/worktrees/
+
+# CI result folders
+Call_Listener_Frontend/v-0/ci-*/
+Call_Listener_Frontend/v-0/installer/
