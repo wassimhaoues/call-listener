@@ -1,0 +1,129 @@
+{
+  "_comment": "Synthetic ChatOpenRouter-shaped responses consumed by test/helpers/fakeProvider.js. Token counts are invented; no response came from a real provider.",
+  "responses": {
+    "introSuccess": {
+      "kind": "success",
+      "content": "Open with your billing migration: scope, risk, and the zero-data-loss result.",
+      "usage_metadata": { "input_tokens": 900, "output_tokens": 60, "total_tokens": 960 }
+    },
+    "migrationAnswer": {
+      "kind": "success",
+      "content": [
+        { "type": "text", "text": "Situation: a legacy billing database. " },
+        { "type": "text", "text": "Action: staged dual writes. Result: zero data loss.  " }
+      ],
+      "usage_metadata": { "input_tokens": 1200, "output_tokens": 150, "total_tokens": 1350 }
+    },
+    "missingUsage": {
+      "kind": "success",
+      "content": "I would rehearse the rollback earlier and automate it."
+    },
+    "responseMetadataUsage": {
+      "kind": "success",
+      "content": "Mention the weekly on-call rotation and one concrete incident.",
+      "response_metadata": { "usage": { "prompt_tokens": 1000, "completion_tokens": 100 } }
+    },
+    "emptyWithUsage": {
+      "kind": "success",
+      "content": "   ",
+      "usage_metadata": { "input_tokens": 800, "output_tokens": 0, "total_tokens": 800 }
+    },
+    "rateLimited": {
+      "kind": "error",
+      "name": "RateLimitError",
+      "status": 429,
+      "message": "429 Rate limit exceeded (synthetic)"
+    },
+    "hangUntilAborted": {
+      "kind": "hang"
+    },
+    "introFr": {
+      "kind": "success",
+      "content": "Commencez par la refonte du portail client et son résultat.",
+      "usage_metadata": { "input_tokens": 700, "output_tokens": 40, "total_tokens": 740 }
+    },
+    "answerFr": {
+      "kind": "success",
+      "content": "Situation : portail client vieillissant. Action : livraisons courtes. Résultat : livré en avance.",
+      "usage_metadata": { "input_tokens": 950, "output_tokens": 90, "total_tokens": 1040 }
+    },
+    "answerFrMotivation": {
+      "kind": "success",
+      "content": "Reliez le poste à votre expérience de pilotage de projet.",
+      "usage_metadata": { "input_tokens": 980, "output_tokens": 50, "total_tokens": 1030 }
+    },
+    "lateIntro": {
+      "kind": "deferred",
+      "content": "This introduction arrives after the session ended."
+    }
+  },
+  "cases": [
+    {
+      "name": "success with usage metadata",
+      "response": "migrationAnswer",
+      "adapter": {
+        "text": "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss.",
+        "usage": { "input_tokens": 1200, "output_tokens": 150, "total_tokens": 1350 }
+      },
+      "session": {
+        "outcome": "reply",
+        "costUsd": 0.00042
+      }
+    },
+    {
+      "name": "success with usage only in response_metadata",
+      "response": "responseMetadataUsage",
+      "adapter": {
+        "text": "Mention the weekly on-call rotation and one concrete incident.",
+        "usage": { "prompt_tokens": 1000, "completion_tokens": 100 }
+      },
+      "session": {
+        "outcome": "reply",
+        "costUsd": 0.00032
+      }
+    },
+    {
+      "name": "success with missing usage",
+      "response": "missingUsage",
+      "adapter": {
+        "text": "I would rehearse the rollback earlier and automate it.",
+        "usage": null
+      },
+      "session": {
+        "outcome": "reply",
+        "costUsd": 0
+      }
+    },
+    {
+      "name": "empty reply that still reports usage",
+      "response": "emptyWithUsage",
+      "adapter": {
+        "text": "",
+        "usage": { "input_tokens": 800, "output_tokens": 0, "total_tokens": 800 }
+      },
+      "session": {
+        "outcome": "failed",
+        "costUsd": 0.00016
+      }
+    },
+    {
+      "name": "429 rate limit",
+      "response": "rateLimited",
+      "adapter": { "errorCode": "provider_request_failed", "causeStatus": 429 },
+      "session": { "outcome": "failed", "costUsd": 0 }
+    },
+    {
+      "name": "request deadline exceeded",
+      "response": "hangUntilAborted",
+      "requestTimeoutMs": 5,
+      "adapter": { "errorCode": "provider_timeout" },
+      "session": { "outcome": "failed", "costUsd": 0 }
+    },
+    {
+      "name": "caller abort",
+      "response": "hangUntilAborted",
+      "abortByCaller": true,
+      "adapter": { "errorCode": "provider_aborted" }
+    }
+  ]
+}

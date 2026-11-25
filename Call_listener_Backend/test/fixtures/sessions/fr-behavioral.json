@@ -1,0 +1,98 @@
+{
+  "id": "fr-behavioral-v1",
+  "description": "Synthetic French behavioral interview: French transcription stream, French acknowledgements, and a question detected without a question mark.",
+  "harness": {},
+  "steps": [
+    {
+      "label": "contexte et suggestion d'introduction",
+      "type": "context",
+      "context": "validFr",
+      "provider": "introFr",
+      "expect": [{ "ai_reply": "Commencez par la refonte du portail client et son résultat." }]
+    },
+    { "label": "audio intervieweur", "type": "audio", "source": "system", "bytes": 1920, "count": 1, "expect": [] },
+    { "label": "audio candidate", "type": "audio", "source": "mic", "bytes": 1920, "count": 1, "expect": [] },
+    { "label": "question 1 intermédiaire", "type": "transcript", "source": "system", "text": "Parlez-moi", "isFinal": false, "expect": [] },
+    { "label": "question 1 finale", "type": "transcript", "source": "system", "text": "Parlez-moi de votre dernier projet.", "isFinal": true, "expect": [] },
+    {
+      "label": "question 1 fin d'énoncé",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "answerFr",
+      "providerPromptIncludes": ["Requirement: Pilotage de projet", "Tu es un assistant privé"],
+      "expect": [
+        { "speaker": "caller", "transcript": "Parlez-moi de votre dernier projet." },
+        { "generation": { "state": "thinking" } },
+        { "ai_reply": "Situation : portail client vieillissant. Action : livraisons courtes. Résultat : livré en avance." }
+      ]
+    },
+    { "label": "réponse candidate", "type": "transcript", "source": "mic", "text": "J'ai piloté la refonte du portail client.", "isFinal": true, "expect": [] },
+    {
+      "label": "réponse candidate fin d'énoncé",
+      "type": "utteranceEnd",
+      "source": "mic",
+      "expect": [{ "speaker": "you", "transcript": "J'ai piloté la refonte du portail client." }]
+    },
+    { "label": "acquiescement", "type": "transcript", "source": "system", "text": "D'accord.", "isFinal": true, "expect": [] },
+    {
+      "label": "acquiescement ignoré par le classifieur",
+      "type": "utteranceEnd",
+      "source": "system",
+      "expect": [{ "speaker": "caller", "transcript": "D'accord." }]
+    },
+    {
+      "label": "question sans point d'interrogation",
+      "type": "transcript",
+      "source": "system",
+      "text": "Pourquoi avez-vous choisi ce poste",
+      "isFinal": true,
+      "expect": []
+    },
+    {
+      "label": "question 2 fin d'énoncé",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "answerFrMotivation",
+      "expect": [
+        { "speaker": "caller", "transcript": "Pourquoi avez-vous choisi ce poste" },
+        { "generation": { "state": "thinking" } },
+        { "ai_reply": "Reliez le poste à votre expérience de pilotage de projet." }
+      ]
+    },
+    { "label": "remerciement", "type": "transcript", "source": "system", "text": "Merci.", "isFinal": true, "expect": [] },
+    {
+      "label": "remerciement ignoré par le classifieur",
+      "type": "utteranceEnd",
+      "source": "system",
+      "expect": [{ "speaker": "caller", "transcript": "Merci." }]
+    },
+    { "label": "fin de session", "type": "end", "expect": [] }
+  ],
+  "final": {
+    "streams": [
+      { "label": "system", "language": "fr", "chunks": 1, "finishCalls": 1 },
+      { "label": "mic", "language": "fr", "chunks": 1, "finishCalls": 1 }
+    ],
+    "storedTranscriptionLanguage": "fr",
+    "history": [
+      ["caller", "Parlez-moi de votre dernier projet."],
+      ["assistant", "Situation : portail client vieillissant. Action : livraisons courtes. Résultat : livré en avance."],
+      ["you", "J'ai piloté la refonte du portail client."],
+      ["caller", "D'accord."],
+      ["caller", "Pourquoi avez-vous choisi ce poste"],
+      ["assistant", "Reliez le poste à votre expérience de pilotage de projet."],
+      ["caller", "Merci."]
+    ],
+    "providerCalls": [
+      { "name": "introFr", "status": "resolved" },
+      { "name": "answerFr", "status": "resolved" },
+      { "name": "answerFrMotivation", "status": "resolved" }
+    ],
+    "usage": [
+      { "input_tokens": 700, "output_tokens": 40, "total_tokens": 740 },
+      { "input_tokens": 950, "output_tokens": 90, "total_tokens": 1040 },
+      { "input_tokens": 980, "output_tokens": 50, "total_tokens": 1030 }
+    ],
+    "spentUsd": 0.000742
+  }
+}

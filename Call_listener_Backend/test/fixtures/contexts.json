@@ -1,0 +1,169 @@
+{
+  "_comment": "Synthetic interview context payloads. Every name, company, and achievement is invented for tests; none describe a real person or employer.",
+  "valid": {
+    "validEn": {
+      "description": "Versioned English candidate/job context, technical stage, short answers.",
+      "expect": { "kind": "candidate", "language": "en", "transcriptionLanguage": "en" },
+      "payload": {
+        "version": 1,
+        "candidate": {
+          "name": "Alex Example",
+          "profile": "Synthetic backend engineer profile used only in automated tests.",
+          "skills": ["Node.js", "PostgreSQL", "Redis"],
+          "achievements": [
+            "Led a synthetic billing-service migration to managed PostgreSQL with zero data loss.",
+            "Ran a weekly on-call rotation for a synthetic payments API."
+          ]
+        },
+        "jobOffer": {
+          "title": "Platform Engineer",
+          "company": "Example Corp",
+          "description": "Fictional platform team operating Node.js services and PostgreSQL databases.",
+          "requirements": ["Database migrations", "Incident response"]
+        },
+        "evidence": [
+          {
+            "requirement": "Database migrations",
+            "evidence": "Led a synthetic billing-service migration to managed PostgreSQL with zero data loss."
+          },
+          {
+            "requirement": "Incident response",
+            "evidence": "Ran a weekly on-call rotation for a synthetic payments API."
+          }
+        ],
+        "settings": {
+          "language": "en",
+          "transcriptionLanguage": "en",
+          "stage": "technical",
+          "answerLength": "short"
+        }
+      }
+    },
+    "validFr": {
+      "description": "Versioned French candidate/job context, behavioral stage, standard answers.",
+      "expect": { "kind": "candidate", "language": "fr", "transcriptionLanguage": "fr" },
+      "payload": {
+        "version": 1,
+        "candidate": {
+          "name": "Camille Exemple",
+          "profile": "Profil fictif de cheffe de projet utilisé uniquement pour les tests.",
+          "skills": ["Gestion de projet", "Scrum", "SQL"],
+          "achievements": [
+            "A piloté un projet fictif de refonte du portail client livré en avance."
+          ]
+        },
+        "jobOffer": {
+          "title": "Cheffe de projet numérique",
+          "company": "Société Exemple",
+          "description": "Poste fictif de pilotage de projets web.",
+          "requirements": ["Pilotage de projet"]
+        },
+        "evidence": [
+          {
+            "requirement": "Pilotage de projet",
+            "evidence": "A piloté un projet fictif de refonte du portail client livré en avance."
+          }
+        ],
+        "settings": {
+          "language": "fr",
+          "transcriptionLanguage": "fr",
+          "stage": "behavioral",
+          "answerLength": "standard"
+        }
+      }
+    },
+    "validEnAnswerFrTranscription": {
+      "description": "English answers while the interview itself is transcribed in French.",
+      "expect": { "kind": "candidate", "language": "en", "transcriptionLanguage": "fr" },
+      "payload": {
+        "version": 1,
+        "candidate": { "name": "Sam Placeholder" },
+        "jobOffer": { "title": "Data Analyst" },
+        "settings": { "language": "en", "transcriptionLanguage": "fr" }
+      }
+    },
+    "legacy": {
+      "description": "Pre-v1 caller/me payload still sent by older desktop clients.",
+      "expect": { "kind": "legacy", "language": "fr", "transcriptionLanguage": "fr" },
+      "payload": {
+        "caller": {
+          "name": "Jordan Sample",
+          "company": "Example Corp",
+          "description": "Synthetic interviewer description.",
+          "other": ""
+        },
+        "me": {
+          "name": "Alex Example",
+          "company": "",
+          "description": "Synthetic candidate description.",
+          "objectives": "Practice a technical interview."
+        }
+      }
+    }
+  },
+  "invalid": [
+    {
+      "name": "candidate name over 120 characters",
+      "base": "validEn",
+      "set": { "candidate.name": { "$repeat": "A", "times": 121 } }
+    },
+    {
+      "name": "candidate profile over 12,000 characters",
+      "base": "validEn",
+      "set": { "candidate.profile": { "$repeat": "p", "times": 12001 } }
+    },
+    {
+      "name": "more than 40 skills",
+      "base": "validEn",
+      "set": { "candidate.skills": { "$array": "Skill", "times": 41 } }
+    },
+    {
+      "name": "more than 30 evidence references",
+      "base": "validEn",
+      "set": {
+        "evidence": {
+          "$arrayOf": { "requirement": "Database migrations", "evidence": "Synthetic evidence line." },
+          "times": 31
+        }
+      }
+    },
+    {
+      "name": "blank job title",
+      "base": "validEn",
+      "set": { "jobOffer.title": "   " }
+    },
+    {
+      "name": "unsupported answer language",
+      "base": "validEn",
+      "set": { "settings.language": "de" }
+    },
+    {
+      "name": "unsupported transcription language",
+      "base": "validFr",
+      "set": { "settings.transcriptionLanguage": "es" }
+    },
+    {
+      "name": "unsupported interview stage",
+      "base": "validFr",
+      "set": { "settings.stage": "panel" }
+    },
+    {
+      "name": "legacy description over 12,000 characters",
+      "base": "legacy",
+      "set": { "me.description": { "$repeat": "d", "times": 12001 } }
+    },
+    {
+      "name": "context that is not an object",
+      "payload": "Paste of a CV instead of a structured context"
+    }
+  ],
+  "quirks": [
+    {
+      "name": "unknown future version silently parses as an empty legacy context",
+      "note": "Current behavior, not a contract: version !== 1 falls back to the legacy schema, which strips unknown keys. Tracked for the P0-07 v2 contract work.",
+      "base": "validEn",
+      "set": { "version": 2 },
+      "expect": { "kind": "legacy-empty" }
+    }
+  ]
+}

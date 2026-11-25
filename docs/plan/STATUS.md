@@ -1,10 +1,10 @@
 # Implementation Status
 
-Last updated: 2026-09-29.
+Last updated: 2026-11-25.
 
 | Phase | Status | Evidence |
 | --- | --- | --- |
-| 0 — Baseline | In progress | Portable backend and frontend test commands are implemented. AI-framework compatibility and Linux baseline checks are underway; Windows/Linux install, audio, fixture, and measurement gates remain. |
+| 0 — Baseline | In progress | Portable backend and frontend test commands are implemented. AI-framework compatibility and Linux baseline checks are underway. Synthetic, provider-free backend fixtures and deterministic session replays are in place ([fixtures](fixtures.md)). Windows/Linux install, recorded-audio fixtures, and real-device measurement gates remain. |
 | 1 — Foundations | In progress | Safe rendering, session expiry, stream lifecycle, and provider-request cancellation are implemented and tested; access and Windows-restoration gates remain. |
 | 2 — OpenRouter | In progress | OpenRouter is locally configured with the selected model, cancellation, a 10-second request deadline, a 600-token output cap, and reported-usage accounting against the $5 session ceiling; one controlled live preflight passed, while streaming, model policy, retries, and multi-model validation remain. |
 | 3 — Candidate preparation | In progress | Local CV/job-description extraction, editable requirements, evidence references, a reviewable preparation brief, confirmed legacy migration, and explicit French/English answer/transcription languages are implemented; model-backed preparation remains. |
@@ -55,6 +55,8 @@ Last updated: 2026-09-29.
 - Added a tested 512 KiB WebSocket audio backpressure limit. When a slow network fills the outbound socket buffer, newly produced audio chunks are dropped and the candidate sees a visible limitation count instead of accumulating stale audio; control messages and reconnect behavior still need their dedicated protocol work.
 - Added a bounded one-node LangGraph workflow to the live suggestion path. It has no autonomous agents or hidden extra model calls; richer evidence selection and graph state remain future gates.
 - Changed default Deepgram utterance logs to source and character-count metadata only; full transcript text is no longer written to the default operational log path.
+- Added synthetic backend fixtures and a deterministic replay harness ([fixtures](fixtures.md)). Three scripted sessions (English two-channel, French, budget-exhausted) run through the real message handler, stream manager, Deepgram service, LangGraph workflow, OpenRouter adapter, stores, and budget, with only Deepgram, the provider client, Redis, and the WebSocket client faked. The tests assert the exact outbound message sequence, role mapping, acknowledgement skipping, latest-question-wins aborts, no output after end, usage/missing-usage accounting, and transcription surviving provider failures. Fixture tables also cover contexts, malformed frames, WebSocket authentication failures, and provider outcomes (success, empty, 429, timeout, abort, missing usage). Step durations are recorded only as diagnostics. These fixtures contain no recorded audio and no real-device or real-provider data.
+- The replay work fixed three small backend bugs, each with a regression test. Evidence selection now matches a term that ends a sentence ("migration."). A context rejected for a mid-capture language change no longer replaces the stored context. The stream manager's default workflow now forwards provider usage to the budget. One known gap is recorded as a `todo` test: an intro suggestion can still be sent after `end`.
 
 ## Latest verification
 
@@ -62,7 +64,8 @@ Run on 2026-09-29 with Node `v24.11.1` and npm `11.10.0`:
 
 | Command | Result |
 | --- | --- |
-| `cd Call_listener_Backend && npm test` | Passed: 53 tests, including candidate/job validation, LangGraph workflow/evidence selection, question classification/latest-question scheduling, typed-question fallback, provider deadlines and terminal generation failures, secure-production/local-development cookie policy, session-cost accounting, HTTP/WebSocket authentication, message limits, stream lifecycle, explicit transcription language, transcript-log privacy, Docker secret-boundary, and readiness. |
+| `cd Call_listener_Backend && npm test` (2026-11-25, Node `v24.11.1`) | Passed: 92 tests (91 pass, 1 documented `todo`), adding synthetic session replays and context, malformed-message, auth, and provider fixture tables. |
+| `cd Call_listener_Backend && npm test` (2026-09-29) | Passed: 53 tests, including candidate/job validation, LangGraph workflow/evidence selection, question classification/latest-question scheduling, typed-question fallback, provider deadlines and terminal generation failures, secure-production/local-development cookie policy, session-cost accounting, HTTP/WebSocket authentication, message limits, stream lifecycle, explicit transcription language, transcript-log privacy, Docker secret-boundary, and readiness. |
 | `cd Call_listener_Backend && npm audit` | Passed: 0 vulnerabilities. |
 | `cd Call_Listener_Frontend/v-0 && npm test` | Passed: 27 tests (CSV parser, React button behavior, platform capabilities, safe suggestion rendering/live guidance and stale-output state, microphone-only setup and typed-question fallback, local/production authentication boundary behavior, candidate/job context, preparation extraction/brief generation, confirmed legacy migration, PCM-batch configuration, and WebSocket audio backpressure). |
 | `cd Call_Listener_Frontend/v-0 && npm exec vite build` | Passed: production renderer build. |
@@ -77,7 +80,7 @@ Run on 2026-09-29 with Node `v24.11.1` and npm `11.10.0`:
 ## Remaining Phase 0 gates
 
 - Run and record clean backend/frontend build and Windows desktop install/audio restoration results on a supported Windows system.
-- Add representative audio/WebSocket/provider fixtures and measurable baseline latency, CPU, memory, message-rate, and usage data.
+- Add recorded synthetic-audio fixtures and measurable baseline latency, CPU, memory, message-rate, and usage data from a named Windows test machine. Synthetic WebSocket/provider/transcript fixtures and replays now exist ([fixtures](fixtures.md)); they are not measurements.
 - Add the model allowlist, provider deadlines/retries/usage controls, and controlled non-production provider checks before exposing a model picker or shipping the live provider.
 - Establish the requested recoverable source snapshot/version-control baseline outside this checkout, which has no `.git` metadata.
 

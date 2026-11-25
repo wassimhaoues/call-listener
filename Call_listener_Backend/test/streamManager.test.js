@@ -138,6 +138,32 @@ test("runs a typed interviewer question through the same transcript and guidance
   ]);
 });
 
+test("the default workflow forwards provider usage to the interview budget", async () => {
+  const recorded = [];
+  const manager = new StreamManager("session-1", {
+    createTranscriptionStream: () => new FakeStream(),
+    ChatHistory: { push: async () => {}, toPrompt: async () => "" },
+    ContextStore: { get: async () => null },
+    generateReply: async (_prompt, _history, { onUsage }) => {
+      await onUsage?.({ input_tokens: 10, output_tokens: 2 });
+      return "A concise answer.";
+    },
+    buildPrompt: () => "reply prompt",
+    Budget: {
+      canGenerate: async () => ({ allowed: true }),
+      recordUsage: async (sessionId, usage) => recorded.push([sessionId, usage]),
+    },
+    log: { info() {}, debug() {}, warn() {}, error() {} },
+  });
+  manager.REPLY_COOLDOWN_MS = 0;
+
+  await manager.submitInterviewerQuestion("How did you lead the migration?", { OPEN: 1, readyState: 1, send() {} });
+  await nextTick();
+  await nextTick();
+
+  assert.deepEqual(recorded, [["session-1", { input_tokens: 10, output_tokens: 2 }]]);
+});
+
 test("reports a terminal generation failure instead of leaving a question pending", async () => {
   const { manager } = createManager({
     generateReply: async () => {
