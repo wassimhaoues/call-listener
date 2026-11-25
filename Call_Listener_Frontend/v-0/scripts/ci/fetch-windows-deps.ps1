@@ -6,12 +6,15 @@ param(
 )
 $ErrorActionPreference = "Stop"
 
-# Update a hash only after checking the new upstream release.
+# Sha256 pins a versioned download; update it only after reviewing the new
+# release. NirSoft replaces files in place at an unversioned URL, so
+# SoundVolumeView is verified by its Authenticode signer instead.
 $deps = @(
   @{
     Name   = "SoundVolumeView"
     Url    = "https://www.nirsoft.net/utils/soundvolumeview-x64.zip"
-    Sha256 = "11d4695f42ad24f228e9682c7307df39d93bc0fe5b8f8ac4ed560a54e7eb0509"
+    Signer = "Nir Sofer"
+    Exe    = "SoundVolumeView.exe"
     Dest   = "."
   },
   @{
@@ -31,12 +34,21 @@ foreach ($dep in $deps) {
   Write-Host "Downloading $($dep.Name) from $($dep.Url)"
   Invoke-WebRequest -Uri $dep.Url -OutFile $zip -UseBasicParsing
   $actual = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
-  if ($actual -ne $dep.Sha256) {
+  Write-Host "$($dep.Name) SHA-256: $actual"
+  if ($dep.Sha256 -and $actual -ne $dep.Sha256) {
     throw "$($dep.Name) hash mismatch: expected $($dep.Sha256), got $actual. Upstream release changed; review it and update the pinned hash."
   }
   $dest = Join-Path $BinDir $dep.Dest
   New-Item -ItemType Directory -Force -Path $dest | Out-Null
   Expand-Archive -Path $zip -DestinationPath $dest -Force
+  if ($dep.Signer) {
+    $sig = Get-AuthenticodeSignature -FilePath (Join-Path $dest $dep.Exe)
+    $subject = $sig.SignerCertificate.Subject
+    if ($sig.Status -ne "Valid" -or $subject -notmatch [regex]::Escape($dep.Signer)) {
+      throw "$($dep.Name) signature check failed: status $($sig.Status), signer '$subject'"
+    }
+    Write-Host "$($dep.Name) signature valid: $subject"
+  }
   Write-Host "$($dep.Name) verified and extracted to $dest"
 }
 
