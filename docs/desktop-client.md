@@ -14,6 +14,14 @@ Do not enable Node integration or disable context isolation. Keep tokens in `Aut
 
 The conversation page captures two distinct `audioinput` devices when system capture is available. In Linux microphone-only mode it captures just the candidate microphone and clearly identifies interviewer audio as unavailable. `src/worklets/pcm-processor.js` is preferred; the page falls back to `ScriptProcessor` if worklets fail. Both paths emit PCM16, mono, 48 kHz chunks to the backend. UI device and legacy context selections are stored in localStorage.
 
+`src/pages/Conversation.jsx` only composes and renders the live workspace. Its logic lives in tested modules:
+
+- `src/services/conversationState.js` — pure reducer for status, transcript entries, the current (latest) interviewer question, pending/thinking guidance, stale-guidance hiding, terminal failure/budget states, pause, and dropped-audio counts. Incoming server messages pass through an ordered list of handlers.
+- `src/hooks/useInterviewSocket.js` — opens the socket from `window.callApi.getWsUrl()`, sends stored context on open, routes every socket event to one `dispatch`, applies audio backpressure, sends typed questions, and ends idempotently (also on unmount).
+- `src/hooks/useAudioCapture.js` — getUserMedia, AudioWorklet (or `ScriptProcessor` fallback) graph, meter levels, flush, and idempotent release of tracks and the `AudioContext`.
+- `src/services/audioCapture.js` and `src/services/interviewMessages.js` — pure capture helpers and client message encoders.
+- `src/components/TranscriptLog.jsx` — text-only transcript with near-bottom auto-scroll.
+
 ## Windows audio routing
 
 `AudioRouteManager` uses bundled SoundVolumeView to detect VB-Cable, save the prior playback device, enable “listen to this device,” and restore settings on a clean exit. It writes recovery state to Electron user data and starts `watchdog.js` so a crashed app also restores the device. VB-Cable installation requires elevation. Test routing carefully: it changes the Windows default playback device.

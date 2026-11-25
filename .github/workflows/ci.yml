@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            Call_listener_Backend/package-lock.json
+            Call_Listener_Frontend/v-0/package-lock.json
+      - name: Backend tests
+        working-directory: Call_listener_Backend
+        run: |
+          npm ci
+          npm test
+      - name: Frontend tests
+        working-directory: Call_Listener_Frontend/v-0
+        run: |
+          npm ci
+          npm test
+      - name: Renderer build
+        working-directory: Call_Listener_Frontend/v-0
+        run: npm exec vite build
+
+  windows-package:
+    name: Windows installer
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: Call_Listener_Frontend/v-0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Call_Listener_Frontend/v-0/package-lock.json
+      - name: Fetch bundled Windows tools
+        run: ./scripts/ci/fetch-windows-deps.ps1 -BinDir bin
+      - run: npm ci
+      - name: Build NSIS installer (unsigned)
+        env:
+          NODE_ENV: production
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          npm exec vite build
+          npm exec electron-builder -- --win nsis --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: Call_Listener_Frontend/v-0/dist/*Setup*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-smoke:
+    name: Windows install/launch/uninstall smoke
+    needs: windows-package
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: Call_Listener_Frontend/v-0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: Call_Listener_Frontend/v-0/installer
+      - name: Smoke test installer
+        run: |
+          $installer = Get-ChildItem installer -Filter *Setup*.exe | Select-Object -First 1
+          ./scripts/ci/smoke-installer.ps1 -Installer $installer.FullName -OutDir ci-smoke
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-smoke-results
+          path: Call_Listener_Frontend/v-0/ci-smoke
+          retention-days: 14
+
+  windows-audio:
+    name: Windows audio routing/restoration (VB-Cable)
+    needs: test
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: Call_Listener_Frontend/v-0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Call_Listener_Frontend/v-0/package-lock.json
+      - name: Fetch bundled Windows tools
+        run: ./scripts/ci/fetch-windows-deps.ps1 -BinDir bin
+      - name: Install VB-Cable and start audio services
+        run: ./scripts/ci/install-vbcable.ps1 -BinDir bin
+      - run: npm ci
+      - name: Download Electron binary
+        run: node node_modules/electron/install.js
+      - name: Audio restoration scenarios
+        env:
+          ELECTRON_RUN_AS_NODE: "1"
+        run: |
+          $electron = node -p "require('electron')" | Select-Object -Last 1
+          if (-not (Test-Path $electron)) { throw "Electron binary not found: $electron" }
+          & $electron scripts/ci/audioRestore.cjs bin/SoundVolumeView.exe ci-audio
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-audio-results
+          path: Call_Listener_Frontend/v-0/ci-audio
+          retention-days: 14
