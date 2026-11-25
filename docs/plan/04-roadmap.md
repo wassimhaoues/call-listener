@@ -88,7 +88,7 @@ Rollback: route new generations to the simple interview-aware chain with the sam
 
 Depends on Phase 4. Outcome: a usable interview product, not a renamed generic conversation page.
 
-- [ ] Extract capture, socket lifecycle, transcript state, and generation state from `Conversation.jsx` into tested services/hooks.
+- [x] Extract capture, socket lifecycle, transcript state, and generation state from `Conversation.jsx` into tested services/hooks.
 - [ ] Build panels for current interviewer question, concise answer outline, relevant experience, expandable detail, and transcript. Clearly distinguish spoken candidate answers from generated suggestions. **Partially complete:** the live workspace has separate current-question, safe-guidance, relevant-experience, and transcript panels; detail expansion and explicit answer-outline sections remain.
 - [ ] Add pause/resume, stop, shorten/expand, regenerate, model selection, and clarification actions, with keyboard access and readable focus states. **Partially complete:** keyboard-accessible pause/resume and stop controls are present; pause stops outgoing audio chunks without ending the session. The remaining response/model controls are pending.
 - [ ] Display connecting, ready, listening, thinking, reconnecting, incomplete, and transcription-only states. Retain useful previous output without implying it answers the newest question. **Partially complete:** connecting, ready, listening, paused, backend-confirmed thinking, and terminal guidance-unavailable states are shown; stale guidance is hidden while the current question is generating. Reconnecting/incomplete state handling remains.
