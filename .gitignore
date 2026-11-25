@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Runtime logs (may contain session metadata)
+logs/
+logs\\*
+*.log
+
+# Generated build output
+Call_Listener_Frontend/v-0/dist/
+Call_Listener_Frontend/v-0/release/
+Call_Listener_Frontend/v-0/out/
+
+# Third-party Windows binaries/drivers (not redistributed in this repo; see docs/getting-started.md)
+Call_Listener_Frontend/v-0/bin/
+Call_Listener_Frontend/*.zip
+
+# Local tooling
+.claude/settings.local.json
+graphify-out/
+.DS_Store
+Thumbs.db
+coverage/

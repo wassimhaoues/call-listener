@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <title>Call Listener</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+      default-src 'self';
+      base-uri 'self';
+      script-src 'self';
+      style-src 'self' 'unsafe-inline';
+      img-src 'self' data: blob:;
+      connect-src 'self' https: wss:;
+      media-src 'self' blob:;
+      object-src 'none';
+      frame-ancestors 'none';
+    "
+    />
+  </head>
+  <body class="app-bg app-text h-full">
+    <div id="root" class="h-full"></div>
+    <script type="module" src="/main.jsx"></script>
+  </body>
+</html>

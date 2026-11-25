@@ -1,0 +1,145 @@
+# Phase-by-Phase Delivery Roadmap
+
+Phase 0 is in progress; later phases are pending. Estimates and calendar commitments come after Phase 0 establishes the working baseline. Each phase should contain small reviewable changes, update the affected documentation, and demonstrate its exit gate before promotion.
+
+Dependencies: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8**. Phase 3 screen mockups and Phase 5 layout work may proceed once their contracts are stable; integration still follows these gates.
+
+## Phase 0 — Establish a reproducible baseline
+
+Outcome: the current system can be rebuilt, exercised, and compared against later versions.
+
+- [ ] Inventory source, configuration names, package locks, existing binaries, audio assets, and release identifiers without copying credentials.
+- [ ] Establish a recoverable source snapshot/version-control baseline; preserve all existing files. Record installer provenance separately from the source build.
+- [x] Verify the current Node/package compatibility and run an isolated LangChain/LangGraph/OpenRouter construction test; exact backend package versions are locked. Windows build prerequisites still need a supported Windows machine.
+- [ ] Record Ubuntu 24.04/PipeWire as the Linux target and run the Linux baseline from [Linux desktop support](08-linux-support.md).
+- [x] Replace placeholder checks with a backend test harness and renderer tests using Vitest/React Testing Library. Extend them with mocked provider adapters, fake WebSocket clients, and disposable Redis coverage.
+- [ ] Capture fixtures for context, mic/system audio, transcripts, suggestions, malformed messages, authentication failures, and end/close behavior.
+- [ ] Measure current speech-to-transcript, transcript-to-reply, CPU/memory, message rate, and provider usage on a named Windows test machine and synthetic interview recordings.
+- [ ] Record the candidate-only product scope, initial French/English requirement proposal, deployment endpoint, and model cost envelope.
+
+Exit gate: repeatable clean install/build, documented Windows happy path and restore behavior, baseline fixtures, real passing checks, and a known-issues list. Do not treat the remaining placeholder lint command as verification.
+
+Rollback: no intended runtime behavior change; restore the baseline manifests/tooling if harness setup affects packaging.
+
+## Phase 1 — Stabilize sessions, capture lifecycle, and access
+
+Depends on Phase 0. Outcome: a reliable foundation before provider and UI changes.
+
+- [x] Make stream creation single-flight per source and attach listeners after successful stream initialization. Bounded startup buffering remains pending.
+- [ ] Make stop/close idempotent, cancel pending model work, clear timers, and reject late results after end. **Partially complete:** stop/close is idempotent, aborts active provider work, and suppresses late reply output; intro-path lifecycle work remains.
+- [ ] Add stable opaque IDs, owner binding, TTLs, bounded queues, and explicit session states. **Partially complete:** chat/context records now have a two-hour expiry and bounded chat turns; opaque resumable IDs, owner binding, queues, states, and the v2 protocol remain.
+- [ ] Replace raw model HTML rendering with safe text/Markdown. **Partially complete:** safe text rendering, context validation, 64 KiB audio/128 KiB WebSocket limits, liveness/readiness, and metadata-only transcript logs are implemented. Rate limits remain.
+- [ ] For the controlled pilot, enroll installations with revocable credentials stored in the OS credential facility; a hostname and public app ID cannot establish ownership. **Partially complete:** the desktop now uses a persisted random installation ID and cookie-authenticated WebSocket URL, but it is not account authentication, revocable enrollment, or a ticket exchange yet.
+- [x] Exclude all `.env*` files from the container build context, document runtime secret injection, and test the Docker ignore rule. A deployment-image inspection remains a release check.
+- [ ] Audit audio restoration through stop, tray toggle, suspend/resume, crash, and quit. Preserve the original playback snapshot until restoration succeeds.
+- [x] Extract platform capability checks so Linux reaches the candidate workspace without running Windows-only routing, installer, or watchdog code. Renderer tests and source checks pass; live Electron validation remains in the Linux workstream.
+
+Exit gate: repeated start/stop and stream-start races pass; foreign sessions/tickets are rejected; ended sessions emit no new suggestions; Windows restoration tests pass. Transcription remains available if AI fails.
+
+Rollback: disable v2 access and new sessions while draining existing sessions; retain security and lifecycle fixes that pass regression tests. Do not expose legacy enrollment publicly as a rollback shortcut.
+
+## Phase 2 — Introduce OpenRouter and model selection
+
+Depends on Phase 1. Outcome: the candidate can choose a supported model without editing code.
+
+- [x] Introduce a provider-independent AI service and migrate context-intro and reply generation through it.
+- [ ] Implement the LangChain OpenRouter adapter with streaming, AbortSignal propagation, deadline, bounded retries, normalized errors, and usage accounting. **Partially complete:** the non-streaming LangChain adapter accepts propagated `AbortSignal`, enforces a configurable 10-second request deadline, returns normalized provider errors, caps output at 600 tokens, and records reported token usage against the approved session ceiling. One minimal controlled preflight passed with the selected model; live streaming, safe idempotent retries, and multi-scenario provider validation remain.
+- [x] Add conditional provider configuration; OpenRouter mode does not require `GROQ_API_KEY`.
+- [ ] Serve a cached allowlisted model catalog and add the initial model picker to the current UI. Display unavailable models and reject unsupported selections server-side.
+- [ ] Make model choice session-scoped, model changes apply to the next request, and cross-model fallbacks explicit. Enforce per-session request/token/spend limits.
+- [ ] Test invalid keys, 429s, timeouts, removed models, unsupported parameters, cancellation, incomplete streams, and missing usage metadata.
+
+Exit gate: at least two model IDs pass controlled end-to-end checks; selected and actual IDs are visible; provider failure leaves audio/transcription intact; old-client final-response behavior still works.
+
+Rollback: explicitly select the temporary Groq adapter for legacy-compatible sessions, or use transcription-only mode. Do not silently transfer an interview to another provider.
+
+## Phase 3 — Replace generic call context with candidate/job preparation
+
+Depends on Phase 2. Outcome: the app understands the candidate and the specific job opportunity.
+
+- [x] Add versioned CandidateProfile, JobOffer, interview settings, and evidence schemas. Validated context is accepted through the existing session protocol; a dedicated preparation API remains pending.
+- [x] Replace Caller/Me forms with Candidate → Job Offer → Interview Settings → Audio Check. Language and answer-length settings are included; model selection waits for the model catalog.
+- [x] Accept typed/pasted CV and job-description content, show extracted facts for correction, and build experience-to-requirement references. Initial extraction is local and deterministic; raw pasted CV text is not persisted or sent to the backend, and all extracted facts remain editable before a session begins.
+- [ ] Produce candidate introduction, relevant STAR examples, practice topics, and questions to ask the interviewer using bounded prompts. **Partially complete:** the candidate can generate a local, reviewable brief from approved facts without a model call; a separately controlled model-backed preparation flow remains pending.
+- [x] Import compatible old localStorage data only after candidate confirmation; never reinterpret generic caller details as candidate achievements. Preserve the original data until migration succeeds. Legacy context is backed up locally before its safe draft fields are copied into the editable candidate/job form.
+- [x] Make transcription language and answer language explicit; test English/French profiles instead of silently inheriting French-only prompts. The preparation form carries separate validated values, and Deepgram stream startup uses the selected transcription language.
+
+Exit gate: a candidate can prepare two distinct job applications with isolated context; output reflects the correct candidate/job and contains no invented experience in the evaluation fixtures.
+
+Rollback: hide the new preparation flow for new sessions and retain versioned data for re-entry. Do not send the new schema into the old generic prompt builder.
+
+## Phase 4 — Add the LangGraph interview workflow
+
+Depends on Phase 3. Outcome: relevant, context-aware assistance driven by completed interviewer questions or candidate actions.
+
+- [ ] Implement the graph described in [target architecture](03-target-architecture.md) with bounded state, validated node inputs/outputs, and versioned prompts. **Partially complete:** a tested two-node LangGraph workflow owns grounded suggestion generation and selects bounded candidate-approved evidence; richer state validation and prompt versioning remain.
+- [ ] Distinguish interviewer questions from acknowledgements; include preceding candidate answers and job evidence. Handle multipart and follow-up questions. **Partially complete:** a tested French/English fast-path classifier preserves acknowledgements in history but prevents them from triggering a generation, and the graph selects relevant job-evidence references; richer multipart/follow-up interpretation remains.
+- [x] Replace busy/cooldown drops with a bounded scheduler: keep transcript events, cancel or supersede obsolete generations, and answer the latest relevant question. The tested scheduler keeps transcript history, aborts obsolete active work, and emits only the latest relevant response.
+- [ ] Add outline/detail/STAR responses, clarification help, and evidence references. Use explicit missing-evidence behavior. **Partially complete:** the response-length setting now instructs a grounded short, outline/evidence, or detailed STAR output; evidence references and missing-evidence behavior are in the prompt. Candidate controls and rendered response sections remain.
+- [ ] Stream validated candidate-facing content through generation IDs; suppress stale output and avoid duplicate completion on retries or resume.
+- [ ] Keep the fast path to one generation call where possible; perform summaries/preparation outside the critical path. Bound total model calls, tokens, graph steps, and repair attempts.
+- [ ] Evaluate graph output against a simple interview-aware LangChain chain on identical fixtures. Adopt checkpointing only with a proven recovery requirement and tested backend.
+
+Exit gate: grounding, question relevance, cancellation, context isolation, and latency gates pass; the graph demonstrably improves usefulness without an unacceptable latency/cost increase.
+
+Rollback: route new generations to the simple interview-aware chain with the same inputs/output contract and selected OpenRouter model. Keep candidate-specific behavior intact.
+
+## Phase 5 — Deliver the live candidate workspace
+
+Depends on Phase 4. Outcome: a usable interview product, not a renamed generic conversation page.
+
+- [ ] Extract capture, socket lifecycle, transcript state, and generation state from `Conversation.jsx` into tested services/hooks.
+- [ ] Build panels for current interviewer question, concise answer outline, relevant experience, expandable detail, and transcript. Clearly distinguish spoken candidate answers from generated suggestions. **Partially complete:** the live workspace has separate current-question, safe-guidance, relevant-experience, and transcript panels; detail expansion and explicit answer-outline sections remain.
+- [ ] Add pause/resume, stop, shorten/expand, regenerate, model selection, and clarification actions, with keyboard access and readable focus states. **Partially complete:** keyboard-accessible pause/resume and stop controls are present; pause stops outgoing audio chunks without ending the session. The remaining response/model controls are pending.
+- [ ] Display connecting, ready, listening, thinking, reconnecting, incomplete, and transcription-only states. Retain useful previous output without implying it answers the newest question. **Partially complete:** connecting, ready, listening, paused, backend-confirmed thinking, and terminal guidance-unavailable states are shown; stale guidance is hidden while the current question is generating. Reconnecting/incomplete state handling remains.
+- [ ] Make capture active only during an interview; stopping releases media tracks and audio routing through an explicit lifecycle. Closing to tray must preserve clear active-session behavior.
+- [ ] Handle blocked permissions, missing devices, empty context, unsupported platforms, unavailable models, and refresh/re-entry cleanly. **Partially complete:** microphone-only mode now provides a bounded typed interviewer-question fallback; permission, unavailable-model, and re-entry flows remain.
+- [ ] Deliver Linux microphone-only mode while PipeWire system-audio capture follows its dedicated gates.
+
+Exit gate: a candidate completes prepare → device check → live interview → stop on Windows; controls behave correctly during model/network failure; keyboard and rendering tests pass.
+
+Rollback: use the simpler candidate workspace built in Phase 3 with the same v2 protocol. Keep the new feature hidden if its backend capability is unavailable.
+
+## Phase 6 — Improve audio, response speed, and reconnection
+
+Depends on Phase 5. Outcome: measured improvements under realistic long interviews and poor networks.
+
+- [ ] Measure batching options (initial candidates: 20/40/60 ms) against current per-render-block messages. Preserve PCM format and verify actual device sample rates/resampling. **Partially complete:** the AudioWorklet uses a 20 ms linear16 batch with a Stop flush; real-device sample-rate and latency comparison remain.
+- [ ] Add bounded audio buffers and WebSocket backpressure. **Partially complete:** the renderer caps its WebSocket audio queue at 512 KiB and visibly counts newly dropped chunks during congestion. Control-message priority, interval reporting, and reconnect-session protection remain.
+- [ ] Add interim transcript UI, utterance deduplication, startup/final-buffer handling, and endpoint tuning. Generate from completed questions initially; speculative replies require separate evidence of benefit.
+- [ ] Reconnect with bounded jittered backoff, fresh tickets, stable owner/session identity, and event replay. Restore context/model choice without duplicating paid generation.
+- [ ] Compare binary framing against batched base64; add it only if the gain justifies a new negotiated transport capability.
+- [ ] Benchmark context trimming, prompt caching where supported, and optional summary scheduling. Preserve evidence and candidate corrections.
+
+Exit gate: Phase 0 measurements improve or stay within agreed tolerances; slow-network, reconnect, 60-minute soak, sleep/wake, and physical-device tests pass.
+
+Rollback: independently revert batching size/transport capability or endpoint tuning. Resume compatibility stays available; do not couple performance tuning to a schema rollback.
+
+## Phase 7 — Candidate debrief and controlled persistence
+
+Depends on Phase 6. Outcome: the candidate can learn from and optionally retain their interview.
+
+- [ ] Generate a review from actual spoken transcript, clearly separating AI suggestions from statements the candidate made.
+- [ ] Add questions covered, self-review notes, evidence-based improvement topics, and editable follow-up drafts; do not automate external messages.
+- [ ] Offer save/export/delete. Select durable storage through an architecture decision: local encrypted storage for a single-device product, or authenticated backend storage for account-based sync. Implement one initially, not both.
+- [ ] Apply owner isolation, retention, backup/deletion behavior, and schema migration tests. Saved history must not depend on ephemeral Redis keys or an in-memory graph checkpointer.
+- [ ] Add document upload/parsing only as a separately gated extension with size/type limits, extraction review, and candidate-controlled deletion.
+
+Exit gate: the candidate can reopen an explicitly saved review, export it, and delete associated records; unsaved sessions expire and cross-owner access fails.
+
+Rollback: stop new saves/reviews while preserving existing saved data in a readable schema; provide export/delete without requiring the new AI workflow.
+
+## Phase 8 — Qualify and release incrementally
+
+Depends on Phase 7 for the full release; a limited live-interview pilot may ship after Phase 6 passes its gates.
+
+- [ ] Run the complete [validation matrix](05-validation-and-rollout.md), including supported old/new client combinations.
+- [ ] Verify clean Windows installation, upgrade, app identity/user-data continuity, driver handling, tray behavior, uninstall audio restoration, and updater configuration.
+- [ ] Complete Linux AppImage/`.deb` qualification before claiming Linux support.
+- [ ] Deploy backend capabilities first with flags off, then the desktop pilot, then enable compatible features for the pilot cohort.
+- [ ] Monitor latency, error rate, stale output, restoration failures, and actual cost; rehearse rollback using the retained installer/container versions.
+- [ ] Update current-system docs to match shipped behavior. Retire Groq/legacy endpoints only after the client-support window and migration gates are satisfied.
+
+Exit gate: candidate workflow and operational gates pass, rollback is demonstrated, and release notes identify supported versions and known limitations. “No breaking changes” is verified against the compatibility matrix, never assumed.
+
+Rollback: stop cohort expansion, disable the failing capability for new sessions, drain active sessions, and redeploy the last compatible backend/client versions. Preserve saved records and the protocol support window; use transcription-only mode when provider recovery is unavailable.

@@ -1,0 +1,106 @@
+{
+  "name": "call-listener",
+  "version": "1.0.0",
+  "description": "Candidate-facing job interview assistant",
+  "desktopName": "call-listener",
+  "homepage": "https://call.coworky.org",
+  "author": "wassim haoues <wassimhws@gmail.com>",
+  "license": "Coworky",
+  "private": true,
+  "main": "main.js",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development concurrently \"vite\" \"wait-on http://127.0.0.1:5173/__ping && electron .\"",
+    "build": "cross-env NODE_ENV=production vite build && electron-builder",
+    "start": "electron .",
+    "test": "vitest run",
+    "test:unit": "vitest run"
+  },
+  "build": {
+    "appId": "org.coworky.calllistener",
+    "productName": "Call Listener",
+    "files": [
+      "dist/**",
+      "main.js",
+      "preload.js",
+      "watchdog.js",
+      "build/**",
+      "services/**",
+      "utils/**",
+      "package.json",
+      "icon.png",
+      "tray.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "bin",
+        "to": "bin"
+      }
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "bin/**",
+      "watchdog.js",
+      "build/**"
+    ],
+    "compression": "normal",
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "CallListener-${version}-Setup.${ext}"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Office",
+      "syncDesktopName": true
+    },
+    "deb": {
+      "compression": "gz"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": false
+    }
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.1.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "concurrently": "^8.0.0",
+    "cross-env": "^10.1.0",
+    "electron": "44.4.5",
+    "electron-builder": "26.15.3",
+    "jsdom": "25.0.1",
+    "tailwindcss": "4.3.3",
+    "vite": "8.3.1",
+    "vitest": "5.0.2",
+    "wait-on": "^9.0.1"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9",
+    "framer-motion": "^11.0.0",
+    "lucide-react": "1.48.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "react-router-dom": "7.18.4"
+  }
+}

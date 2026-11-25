@@ -1,0 +1,38 @@
+{
+  "name": "call_listener_backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Realtime call listener backend (Deepgram + Groq + Redis + WebSocket)",
+  "type": "module",
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development node server/index.js",
+    "start": "cross-env NODE_ENV=production node server/index.js",
+    "lint": "echo \"Linting is not configured yet\" && exit 0",
+    "test": "node --test test/promptBuilder.test.js test/interviewContext.test.js test/interviewWorkflow.test.js test/interviewBudget.test.js test/questionClassifier.test.js test/evidenceSelector.test.js test/deepgramService.test.js test/app.integration.test.js test/websocket.integration.test.js test/messageHandler.test.js test/streamManager.test.js test/sessionStore.test.js test/aiService.test.js test/envConfig.test.js test/dockerConfig.test.js test/frameworkCompatibility.test.js",
+    "test:unit": "node --test test/promptBuilder.test.js test/interviewContext.test.js test/interviewWorkflow.test.js test/interviewBudget.test.js test/questionClassifier.test.js test/evidenceSelector.test.js test/deepgramService.test.js test/messageHandler.test.js test/streamManager.test.js test/sessionStore.test.js test/aiService.test.js",
+    "test:integration": "node --test test/app.integration.test.js test/websocket.integration.test.js",
+    "test:framework": "node --test test/frameworkCompatibility.test.js"
+  },
+  "dependencies": {
+    "@deepgram/sdk": "^4.11.2",
+    "@langchain/core": "1.2.13",
+    "@langchain/langgraph": "1.4.18",
+    "@langchain/openrouter": "0.4.15",
+    "cookie-parser": "^1.4.6",
+    "cross-env": "^7.0.3",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "groq-sdk": "^0.33.0",
+    "ioredis": "^5.8.1",
+    "jsonwebtoken": "^9.0.2",
+    "winston": "^3.18.3",
+    "winston-daily-rotate-file": "^5.0.0",
+    "ws": "^8.18.3",
+    "zod": "4.6.5"
+  }
+}
