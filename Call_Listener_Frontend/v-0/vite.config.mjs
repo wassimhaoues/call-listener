@@ -41,7 +41,10 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     setupFiles: [resolve(__dirname, "test/setup.js")],
-    include: [resolve(__dirname, "test/**/*.{test,spec}.{js,jsx}")],
+    // Globs need forward slashes; path.resolve yields backslashes on Windows.
+    include: [
+      resolve(__dirname, "test/**/*.{test,spec}.{js,jsx}").replace(/\\/g, "/"),
+    ],
   },
   build: {
     outDir: "../dist",

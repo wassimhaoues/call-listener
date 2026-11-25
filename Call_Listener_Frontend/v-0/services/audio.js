@@ -287,6 +287,10 @@ class AudioRouteManager {
 
     try {
       const child = spawn(nodeExe, args, {
+        // Without this, a packaged Electron executable starts a second app
+        // instance (which the single-instance lock quits) instead of running
+        // watchdog.js, so crash restoration never happens.
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
         detached: true,
         stdio: "ignore",
         windowsHide: true,
