@@ -198,6 +198,8 @@ const baseState = {
   // and the explanation of the last rejected action.
   generationKind: null,
   finalGenerationId: null,
+  // The shown final suggestion stopped at the model's output limit.
+  suggestionTruncated: false,
   pendingAction: null,
   actionError: "",
   isPaused: false,
@@ -338,6 +340,7 @@ function applyGenerationResult(state, message) {
       generationId,
       generation: GENERATION.FAILED,
       finalGenerationId: null,
+      suggestionTruncated: false,
       pendingAction: null,
       notice: null,
     };
@@ -356,6 +359,7 @@ function applyGenerationResult(state, message) {
       ? toGenerationKind(message.generation.kind) ?? state.generationKind
       : null,
     finalGenerationId: tagged ? message.generation.id : null,
+    suggestionTruncated: tagged && message.generation.truncated === true,
     pendingAction: null,
     notice: null,
   };
@@ -376,6 +380,7 @@ function applyGenerationThinking(state, message) {
     generation: GENERATION.THINKING,
     generationKind: toGenerationKind(kind),
     finalGenerationId: null,
+    suggestionTruncated: false,
     pendingAction: null,
     actionError: "",
     notice: null,

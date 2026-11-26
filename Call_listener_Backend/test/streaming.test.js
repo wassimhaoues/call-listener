@@ -222,6 +222,65 @@ test("the LangGraph workflow forwards onToken to the reply generator", async () 
   assert.deepEqual(seen, ["Hel", "lo"]);
 });
 
+test("adapter reports a reply cut at the output limit, streamed or invoked", async () => {
+  const cases = [
+    { streaming: true, finish: "length", truncated: true },
+    { streaming: true, finish: "stop", truncated: false },
+    { streaming: false, finish: "length", truncated: true },
+    { streaming: false, finish: undefined, truncated: false },
+  ];
+  for (const { streaming, finish, truncated } of cases) {
+    const { FakeModel } = createFakeStreamingModel({
+      chunks: [
+        { content: "Lead with ", response_metadata: {} },
+        { content: "the", response_metadata: finish ? { finish_reason: finish } : {} },
+      ],
+      failInvoke: false,
+    });
+    const finishes = [];
+    const options = { onFinish: (info) => finishes.push(info) };
+    if (streaming) options.onToken = () => {};
+    // The invoke fake has no per-chunk metadata; give it the final one.
+    if (!streaming && finish) {
+      FakeModel.prototype.invoke = async () => ({ content: "Lead with the", response_metadata: { finish_reason: finish } });
+    }
+    assert.equal(await openRouterGenerator(FakeModel)("s", "h", options), "Lead with the");
+    assert.deepEqual(finishes, [{ truncated }], `${streaming ? "stream" : "invoke"} ${finish}`);
+  }
+});
+
+test("the Groq rollback adapter reports a length-limited reply", async () => {
+  class FakeGroq {
+    constructor() {
+      this.chat = {
+        completions: { create: async () => ({ choices: [{ message: { content: "Cut" }, finish_reason: "length" }] }) },
+      };
+    }
+  }
+  const generateReply = createAiReplyGenerator({
+    provider: "groq",
+    groqApiKey: "groq-test-key",
+    log: silentLog,
+    dependencies: { groq: { GroqClient: FakeGroq } },
+  });
+  const finishes = [];
+  assert.equal(await generateReply("s", "h", { onFinish: (info) => finishes.push(info) }), "Cut");
+  assert.deepEqual(finishes, [{ truncated: true }]);
+});
+
+test("the LangGraph workflow forwards onFinish to the reply generator", async () => {
+  const seen = [];
+  const workflow = createInterviewWorkflow({
+    buildPrompt: () => "prompt",
+    generateReply: async (_prompt, _history, { onFinish }) => {
+      onFinish({ truncated: true });
+      return "Partial";
+    },
+  });
+  await workflow.invoke({ context: "", history: "caller: Hi?", onFinish: (info) => seen.push(info) });
+  assert.deepEqual(seen, [{ truncated: true }]);
+});
+
 // --- Capability negotiation -------------------------------------------------
 
 test("parses client capabilities, ignoring unknown names and rejecting malformed lists", () => {
@@ -309,13 +368,14 @@ function createStreamingManager({ stream = true, flushMs = 50 } = {}) {
     ContextStore: { get: async () => ({ candidate: "Ada" }) },
     generateReply: async () => { throw new Error("unused"); },
     buildPrompt: () => "prompt",
-    runInterviewWorkflow: ({ signal, onToken, onModel }) => new Promise((resolve, reject) => {
+    runInterviewWorkflow: ({ signal, onToken, onModel, onFinish }) => new Promise((resolve, reject) => {
       runs.push({
         signal,
         onToken,
         token: (text) => onToken?.(text),
-        resolve: (text) => {
+        resolve: (text, { truncated = false } = {}) => {
           onModel({ selected: "test/model", actual: null });
+          onFinish?.({ truncated });
           resolve(text);
         },
         reject,
@@ -430,6 +490,18 @@ test("a failed streamed generation reports failure with its ID and the legacy re
     { generation: { id: "g1", kind: "answer", state: "thinking" } },
     { generation: { id: "g1", kind: "answer", state: "failed" }, ai_reply: "[Erreur du modèle]" },
   ]);
+});
+
+test("a reply cut at the output limit is done with an additive truncated flag", async () => {
+  const { ask, settle, generationMessages } = createStreamingManager({ flushMs: 60_000 });
+  const run = await ask("Walk me through the migration?");
+  run.resolve("Lead with the", { truncated: true });
+  await settle();
+  assert.deepEqual(generationMessages().at(-1), {
+    ai_reply: "Lead with the",
+    model: { selected: "test/model", actual: null },
+    generation: { id: "g1", kind: "answer", state: "done", truncated: true },
+  });
 });
 
 test("an empty streamed reply is a failure, never a done message", async () => {

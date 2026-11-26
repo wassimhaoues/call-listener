@@ -292,3 +292,20 @@ describe("revoked installation", () => {
     expect(state.finalGenerationId).toBeNull();
   });
 });
+
+describe("truncated suggestions", () => {
+  it("flags a done generation cut at the output limit until the next one starts", () => {
+    const done = reduce(
+      [
+        server({ generation: { id: "g1", kind: "answer", state: "thinking" } }),
+        server({ ai_reply: "Lead with the", generation: { id: "g1", kind: "answer", state: "done", truncated: true } }),
+      ],
+      live()
+    );
+    expect(done.suggestionTruncated).toBe(true);
+    const next = reduce([server({ generation: { id: "g2", kind: "answer", state: "thinking" } })], done);
+    expect(next.suggestionTruncated).toBe(false);
+    const untagged = reduce([server({ ai_reply: "Intro", truncated: true })], live());
+    expect(untagged.suggestionTruncated).toBe(false);
+  });
+});

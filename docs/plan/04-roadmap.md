@@ -47,7 +47,7 @@ Depends on Phase 1. Outcome: the candidate can choose a supported model without 
 - [x] Add conditional provider configuration; OpenRouter mode does not require `GROQ_API_KEY`.
 - [x] Serve a cached allowlisted model catalog and add the initial model picker to the current UI. Display unavailable models and reject unsupported selections server-side.
 - [ ] Make model choice session-scoped, model changes apply to the next request, and cross-model fallbacks explicit. Enforce per-session request/token/spend limits. **Partially complete:** the selected model is stored in the session context, validated against the allowlist, pinned per generation, and re-read for each request; replies report selected and actual model IDs. There is no cross-model fallback. Per-model spend pricing and request limits remain.
-- [ ] Test invalid keys, 429s, timeouts, removed models, unsupported parameters, cancellation, incomplete streams, and missing usage metadata.
+- [x] Test invalid keys, 429s, timeouts, removed models, unsupported parameters, cancellation, incomplete streams, and missing usage metadata. **Complete 2026-11-26:** provider fixtures and retry tests cover each failure (`test/providerFixtures.test.js`, `test/providerRetries.test.js`, streaming abort/deadline tests); a reply cut at the output-token cap is now detected from `finish_reason` and marked `truncated` on the `done` generation, with a desktop hint.
 
 Exit gate: at least two model IDs pass controlled end-to-end checks; selected and actual IDs are visible; provider failure leaves audio/transcription intact; old-client final-response behavior still works.
 

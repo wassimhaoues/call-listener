@@ -54,7 +54,7 @@ For a streaming client, each live (interviewer-question or response-action) gene
 1. `{ "generation": { "id": "g7", "kind": "answer", "state": "thinking" } }` — exactly once, before the model call.
 2. Zero or more `{ "generation": { "id": "g7", "kind": "answer", "state": "streaming" }, "delta": "..." }`. Deltas are raw candidate-facing text (whitespace included). They are coalesced on the server and sent at most every ~50 ms. Reasoning or other non-text model output is never streamed.
 3. Exactly one terminal message:
-   - `{ "ai_reply": "...", "model"?: {...}, "generation": { "id": "g7", "kind": "answer", "state": "done" } }`. `ai_reply` is the complete, trimmed suggestion and **replaces** the streamed text. Any pending delta is sent before it.
+   - `{ "ai_reply": "...", "model"?: {...}, "generation": { "id": "g7", "kind": "answer", "state": "done" } }`. `ai_reply` is the complete, trimmed suggestion and **replaces** the streamed text. Any pending delta is sent before it. When the provider reports that the reply stopped at the output-token cap (`finish_reason: "length"`), the generation object also carries an additive `"truncated": true`; the suggestion may end mid-sentence. Clients that do not know the field can ignore it.
    - or `{ "generation": { "id": "g7", "kind": "answer", "state": "failed" }, "ai_reply": "[Erreur du modèle]" }`. Discard any streamed text for that ID. A reply that is empty after trimming is a failure, never `done`.
 
 Ordering guarantees:

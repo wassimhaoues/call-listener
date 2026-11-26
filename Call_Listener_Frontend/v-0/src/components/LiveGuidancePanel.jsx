@@ -121,6 +121,7 @@ export default function LiveGuidancePanel({
   onSubmitTypedQuestion,
   isThinking = false,
   isStreaming = false,
+  truncated = false,
   model = null,
   alerts = [],
   generationKind = null,
@@ -178,6 +179,11 @@ export default function LiveGuidancePanel({
         {isStreaming && (
           <p className="mt-1 text-xs text-[var(--text-2)]" role="status">
             Still writing…
+          </p>
+        )}
+        {truncated && !isStreaming && !isThinking && suggestion && (
+          <p className="mt-1 text-xs text-[var(--text-2)]">
+            This answer reached the length limit and may end mid-sentence. Use Shorten for a tighter version.
           </p>
         )}
         {!isThinking && !isStreaming && modelLabel && (
