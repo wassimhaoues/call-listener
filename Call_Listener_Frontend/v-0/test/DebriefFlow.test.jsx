@@ -77,7 +77,7 @@ beforeEach(() => {
   localStorage.setItem("systemAudioEnabled", "false");
   localStorage.setItem(
     "callContext",
-    JSON.stringify({ version: 1, evidence: [{ requirement: "Database migrations", evidence: "Led a billing migration" }] })
+    JSON.stringify({ version: 1, candidate: { name: "Ada" }, jobOffer: { title: "Engineer" }, evidence: [{ requirement: "Database migrations", evidence: "Led a billing migration" }] })
   );
 });
 

@@ -27,6 +27,7 @@ The conversation page captures two distinct `audioinput` devices when system cap
 - `src/services/audioCapture.js` and `src/services/interviewMessages.js` — pure capture helpers and client message encoders.
 - `src/components/TranscriptLog.jsx` — text-only transcript with near-bottom auto-scroll. In-progress interim lines ([protocol](protocols/websocket.md#interim-transcripts)) follow the final entries, labelled "Interviewer (speaking…)" / "Candidate (speaking…)", italic, dimmed, and ending in "…"; growing interim text also follows the bottom.
 - `src/services/debriefState.js`, `src/services/debriefMarkdown.js`, `src/components/DebriefPanel.jsx` — the unsaved review (below).
+- `src/services/storedContext.js` — reads the saved `callContext` without throwing (missing, corrupted or non-object values read as none). The live page checks it before opening the socket or the microphone: without a version-1 context that names the candidate and the job (first run, cleared storage, a legacy context, or a Retry/reload that lands on `/conversation`), it explains why and goes to `/context` instead of starting a session with nothing to ground guidance in.
 
 ### Response actions
 
