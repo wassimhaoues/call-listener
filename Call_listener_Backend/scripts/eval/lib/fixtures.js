@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import path from "node:path";
 import { z } from "zod";
 import { CandidateInterviewContextSchema } from "../../../server/contracts/interviewContext.js";
 import { containsTerm } from "./metrics.js";
+import { resolveSafeDirectory, safeJoin } from "./safePaths.js";
 
 export const QUESTION_TYPES = Object.freeze(["behavioral", "technical", "multipart", "follow-up", "no-evidence"]);
 
@@ -74,43 +74,56 @@ function questionProblems(question, evidenceIds) {
 
 /** Validate one parsed fixture object; returns the normalized case. */
 export function validateCase(raw, source = "fixture") {
-  const parsed = EvalCaseSchema.safeParse(raw);
-  if (!parsed.success) {
-    const issues = parsed.error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`);
-    throw new FixtureError(`${source}: ${issues.join("; ")}`);
-  }
-  const caseDef = parsed.data;
-  const problems = [];
-  const contextResult = CandidateInterviewContextSchema.safeParse(toInterviewContext(caseDef));
-  if (!contextResult.success) {
-    problems.push("context is not a valid version 1 candidate interview context");
-  } else {
-    const { settings } = contextResult.data;
-    if (settings.language !== caseDef.expectations.language) {
-      problems.push("expectations.language must equal context.settings.language");
-    }
-    if (settings.answerLength !== caseDef.expectations.answerLength) {
-      problems.push("expectations.answerLength must equal context.settings.answerLength");
-    }
-  }
+  const caseDef = parseCase(raw, source);
   const evidenceIds = new Set(caseDef.evidence.map((item) => item.id));
-  if (evidenceIds.size !== caseDef.evidence.length) problems.push("evidence IDs must be unique");
-  for (const item of caseDef.evidence) {
-    for (const keyTerm of item.keyTerms) {
-      if (!containsTerm(`${item.requirement} ${item.evidence}`, keyTerm)) {
-        problems.push(`${item.id}: key term "${keyTerm}" does not appear in its evidence`);
-      }
-    }
-  }
-  const ownText = JSON.stringify(caseDef.context) + JSON.stringify(caseDef.evidence);
-  for (const claim of caseDef.expectations.forbiddenClaims) {
-    if (containsTerm(ownText, claim)) problems.push(`forbidden claim "${claim}" appears in the case's own context`);
-  }
-  for (const question of caseDef.questions) {
-    problems.push(...questionProblems(question, evidenceIds));
-  }
-  if (problems.length) throw new FixtureError(`${source}: ${problems.join("; ")}`);
+  const uniqueEvidence = evidenceIds.size === caseDef.evidence.length ? [] : ["evidence IDs must be unique"];
+  throwIfProblems(source, [
+    ...settingsProblems(caseDef),
+    ...uniqueEvidence,
+    ...caseDef.evidence.flatMap(keyTermProblems),
+    ...forbiddenClaimProblems(caseDef),
+    ...caseDef.questions.flatMap((question) => questionProblems(question, evidenceIds)),
+  ]);
   return caseDef;
+}
+
+function parseCase(raw, source) {
+  const parsed = EvalCaseSchema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  const issues = parsed.error.issues.map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`);
+  throw new FixtureError(`${source}: ${issues.join("; ")}`);
+}
+
+function throwIfProblems(source, problems) {
+  if (problems.length) throw new FixtureError(`${source}: ${problems.join("; ")}`);
+}
+
+function settingsProblems(caseDef) {
+  const contextResult = CandidateInterviewContextSchema.safeParse(toInterviewContext(caseDef));
+  if (!contextResult.success) return ["context is not a valid version 1 candidate interview context"];
+  const { settings } = contextResult.data;
+  const problems = [];
+  if (settings.language !== caseDef.expectations.language) {
+    problems.push("expectations.language must equal context.settings.language");
+  }
+  if (settings.answerLength !== caseDef.expectations.answerLength) {
+    problems.push("expectations.answerLength must equal context.settings.answerLength");
+  }
+  return problems;
+}
+
+function keyTermProblems(item) {
+  const text = `${item.requirement} ${item.evidence}`;
+  return item.keyTerms
+    .filter((keyTerm) => !containsTerm(text, keyTerm))
+    .map((keyTerm) => `${item.id}: key term "${keyTerm}" does not appear in its evidence`);
+}
+
+function forbiddenClaimProblems(caseDef) {
+  const ownText = JSON.stringify(caseDef.context) + JSON.stringify(caseDef.evidence);
+  return caseDef.expectations.forbiddenClaims
+    .filter((claim) => containsTerm(ownText, claim))
+    .map((claim) => `forbidden claim "${claim}" appears in the case's own context`);
 }
 
 /**
@@ -119,62 +132,85 @@ export function validateCase(raw, source = "fixture") {
  * case's evidence key terms present in another case's context.
  */
 export function validateSuite(cases) {
+  throwIfProblems("suite", [
+    ...uniquenessProblems(cases),
+    ...coverageProblems(cases),
+    ...isolationProblems(cases),
+  ]);
+  return cases;
+}
+
+function hasDuplicates(values) {
+  return new Set(values).size !== values.length;
+}
+
+function uniquenessProblems(cases) {
+  const checks = [
+    [cases.map((caseDef) => caseDef.id), "case IDs must be unique"],
+    [cases.flatMap((caseDef) => caseDef.questions.map((question) => question.id)), "question IDs must be unique across cases"],
+    [cases.flatMap((caseDef) => caseDef.evidence.map((item) => item.id)), "evidence IDs must be unique across cases"],
+  ];
+  return checks.filter(([values]) => hasDuplicates(values)).map(([, message]) => message);
+}
+
+function coverageProblems(cases) {
   const problems = [];
-  const caseIds = new Set(cases.map((caseDef) => caseDef.id));
-  if (caseIds.size !== cases.length) problems.push("case IDs must be unique");
-  const questionIds = cases.flatMap((caseDef) => caseDef.questions.map((question) => question.id));
-  if (new Set(questionIds).size !== questionIds.length) problems.push("question IDs must be unique across cases");
-  const evidenceIds = cases.flatMap((caseDef) => caseDef.evidence.map((item) => item.id));
-  if (new Set(evidenceIds).size !== evidenceIds.length) problems.push("evidence IDs must be unique across cases");
   const candidates = new Set(cases.map((caseDef) => normalizeName(caseDef.context.candidate?.name)));
   if (candidates.size < 2) problems.push("at least two distinct candidates are required for context isolation");
-  for (const language of ["en", "fr"]) {
-    if (!cases.some((caseDef) => caseDef.expectations.language === language)) {
-      problems.push(`at least one ${language} case is required`);
-    }
+  const languages = new Set(cases.map((caseDef) => caseDef.expectations.language));
+  for (const language of ["en", "fr"].filter((entry) => !languages.has(entry))) {
+    problems.push(`at least one ${language} case is required`);
   }
   const types = new Set(cases.flatMap((caseDef) => caseDef.questions.map((question) => question.type)));
-  for (const type of QUESTION_TYPES) {
-    if (!types.has(type)) problems.push(`at least one ${type} question is required`);
+  for (const type of QUESTION_TYPES.filter((entry) => !types.has(entry))) {
+    problems.push(`at least one ${type} question is required`);
   }
-  for (const caseDef of cases) {
-    for (const other of cases) {
-      if (other === caseDef) continue;
-      const otherText = JSON.stringify(other.context) + JSON.stringify(other.evidence.map((item) => item.evidence));
-      for (const item of caseDef.evidence) {
-        for (const keyTerm of item.keyTerms) {
-          if (containsTerm(otherText, keyTerm)) {
-            problems.push(`${item.id}: key term "${keyTerm}" also appears in case ${other.id}`);
-          }
-        }
-      }
-    }
-  }
-  if (problems.length) throw new FixtureError(`suite: ${problems.join("; ")}`);
-  return cases;
+  return problems;
+}
+
+function crossCaseLeaks(caseDef, other) {
+  const otherText = JSON.stringify(other.context) + JSON.stringify(other.evidence.map((item) => item.evidence));
+  return caseDef.evidence.flatMap((item) => item.keyTerms
+    .filter((keyTerm) => containsTerm(otherText, keyTerm))
+    .map((keyTerm) => `${item.id}: key term "${keyTerm}" also appears in case ${other.id}`));
+}
+
+function isolationProblems(cases) {
+  return cases.flatMap((caseDef) => cases
+    .filter((other) => other !== caseDef)
+    .flatMap((other) => crossCaseLeaks(caseDef, other)));
 }
 
 function normalizeName(name) {
   return String(name || "").trim().toLowerCase();
 }
 
-/** Load, validate, and fingerprint every `*.json` case in `directory`. */
-export async function loadFixtures(directory) {
-  const names = (await readdir(directory)).filter((name) => name.endsWith(".json")).sort((a, b) => a.localeCompare(b));
-  if (!names.length) throw new FixtureError(`${directory}: no *.json evaluation fixtures found`);
-  const cases = [];
-  const files = [];
-  for (const name of names) {
-    const content = await readFile(path.join(directory, name), "utf8");
-    let raw;
-    try {
-      raw = JSON.parse(content);
-    } catch (error) {
-      throw new FixtureError(`${name}: invalid JSON (${error.message})`);
-    }
-    cases.push(validateCase(raw, name));
-    files.push({ file: name, sha256: createHash("sha256").update(content).digest("hex") });
+async function readCase(directory, name) {
+  const content = await readFile(safeJoin(directory, name), "utf8");
+  let raw;
+  try {
+    raw = JSON.parse(content);
+  } catch (error) {
+    throw new FixtureError(`${name}: invalid JSON (${error.message})`);
   }
+  return {
+    caseDef: validateCase(raw, name),
+    file: { file: name, sha256: createHash("sha256").update(content).digest("hex") },
+  };
+}
+
+/**
+ * Load, validate, and fingerprint every `*.json` case in `directory`, which
+ * must be inside the backend root or the OS temp directory.
+ */
+export async function loadFixtures(directory) {
+  const safeDirectory = await resolveSafeDirectory(directory, "--fixtures");
+  const names = (await readdir(safeDirectory))
+    .filter((name) => name.endsWith(".json"))
+    .sort((a, b) => a.localeCompare(b));
+  if (!names.length) throw new FixtureError(`${safeDirectory}: no *.json evaluation fixtures found`);
+  const loaded = await Promise.all(names.map((name) => readCase(safeDirectory, name)));
+  const cases = loaded.map((entry) => entry.caseDef);
   validateSuite(cases);
-  return { cases, files };
+  return { cases, files: loaded.map((entry) => entry.file) };
 }

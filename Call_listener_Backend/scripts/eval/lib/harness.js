@@ -214,6 +214,46 @@ export function evaluateGates(aggregates, cancellation) {
 }
 
 /**
+ * One spend-guarded call. Once the guard refuses a call, `state.stopped` is
+ * set and every later job is skipped without being sent.
+ */
+async function runGuardedJob(job, state, { guard, generateReply, providerConfig, now }) {
+  const base = baseRecord(job);
+  const worstCase = estimateCallCostUsd({
+    inputChars: job.inputChars,
+    maxOutputTokens: providerConfig.maxOutputTokens,
+    prices: providerConfig.prices,
+  });
+  if (state.stopped || !guard.canAfford(worstCase)) {
+    state.stopped = state.stopped || "max_usd_cap";
+    state.records.push({ ...base, status: "skipped", reason: state.stopped });
+    return;
+  }
+  try {
+    const record = await runJob(job, { generateReply, providerConfig, now });
+    guard.record(record.costUsd);
+    state.records.push({ ...base, ...record });
+  } catch (error) {
+    // Only the error code: provider messages are never copied into reports.
+    state.records.push({ ...base, status: "error", errorCode: error?.code || "error" });
+  }
+}
+
+/**
+ * Chain the jobs so each starts only after the previous one has finished and
+ * its cost is recorded: strict ordering, one call in flight, and the cap
+ * check always sees the spend so far.
+ */
+async function runJobsSequentially(jobs, context) {
+  const state = { records: [], stopped: null };
+  await jobs.reduce(
+    (previous, job) => previous.then(() => runGuardedJob(job, state, context)),
+    Promise.resolve()
+  );
+  return state;
+}
+
+/**
  * Run every selected variant over every fixture question, sequentially.
  * Live runs check the up-front worst-case estimate against the cap before
  * the first call and stop before any call whose worst case would exceed it.
@@ -243,37 +283,18 @@ export async function runEvaluation({
     }
   }
   const guard = createSpendGuard(providerConfig.live ? providerConfig.maxUsd : Infinity);
-  const records = [];
-  let stopped = null;
-  for (const job of jobs) {
-    const base = baseRecord(job);
-    const worstCase = estimateCallCostUsd({
-      inputChars: job.inputChars,
-      maxOutputTokens: providerConfig.maxOutputTokens,
-      prices: providerConfig.prices,
-    });
-    if (stopped || !guard.canAfford(worstCase)) {
-      stopped = stopped || "max_usd_cap";
-      records.push({ ...base, status: "skipped", reason: stopped });
-      continue;
-    }
-    try {
-      const record = await runJob(job, { generateReply, providerConfig, now });
-      guard.record(record.costUsd);
-      records.push({ ...base, ...record });
-    } catch (error) {
-      // Only the error code: provider messages are never copied into reports.
-      records.push({ ...base, status: "error", errorCode: error?.code || "error" });
-    }
-  }
+  const { records, stopped } = await runJobsSequentially(jobs, { guard, generateReply, providerConfig, now });
 
   const aggregates = {};
-  const cancellation = {};
   for (const variant of variants) {
     aggregates[variant.name] = aggregateVariant(records.filter((record) => record.variant === variant.name));
-    const firstJob = jobs.find((job) => job.variant === variant);
-    cancellation[variant.name] = await checkCancellation(variant, firstJob);
   }
+  // Each check uses its own abort-only generator and never calls a provider,
+  // so the variants can be checked concurrently.
+  const checks = await Promise.all(
+    variants.map((variant) => checkCancellation(variant, jobs.find((job) => job.variant === variant)))
+  );
+  const cancellation = Object.fromEntries(variants.map((variant, index) => [variant.name, checks[index]]));
 
   return {
     harnessVersion: HARNESS_VERSION,

@@ -14,6 +14,7 @@ The checks are proxies. They do not replace the human usefulness review in [vali
 | `scripts/eval/lib/metrics.js` | Metric functions and per-variant aggregation. |
 | `scripts/eval/lib/costGuard.js` | Provider configuration, cost estimate, and spend guard. |
 | `scripts/eval/lib/fixtures.js` | Fixture schema and suite validation. |
+| `scripts/eval/lib/safePaths.js` | Path checks for `--fixtures`, `--out`, and the report and fixture file names. |
 | `scripts/eval/lib/harness.js`, `report.js` | The run loop, Phase 4 gate mapping, and JSON/Markdown output. |
 | `test/fixtures/eval/*.json` | Evaluation cases. |
 | `eval-results/` | Generated reports. Git-ignored. |
@@ -85,7 +86,7 @@ npm run eval -- --provider openrouter --live --max-usd 0.05            # paid, c
 npm run eval -- --provider openrouter --live --max-usd 0.05 --model <allowlisted id>
 ```
 
-Each run writes `eval-results/<timestamp>-<provider>.json` (all results, answers, scores, aggregates, gate, and fixture SHA-256 fingerprints) and a matching `.md`. The Markdown has the per-variant comparison table, the Phase 4 gate table, and the failing cases. The exit code is `0` for a completed run and `2` for a configuration, fixture, or cost-cap refusal. A failing gate does not change the exit code.
+Each run writes `eval-results/<timestamp>-<provider>.json` (all results, answers, scores, aggregates, gate, and fixture SHA-256 fingerprints) and a matching `.md`. The Markdown has the per-variant comparison table, the Phase 4 gate table, and the failing cases. `--fixtures` and `--out` must resolve, after symlinks, to a directory inside `Call_listener_Backend/` or the OS temp directory. Both are checked before any model call. Fixture and report file names may contain only letters, digits, `.`, `_`, and `-`. The exit code is `0` for a completed run and `2` for a configuration, path, fixture, or cost-cap refusal. A failing gate does not change the exit code.
 
 Fake-provider runs are a harness and pipeline check, not a model-quality measurement. The fake answers from the evidence in the prompt it receives. It uses evidence that matches the latest interviewer turn, then evidence that matches earlier turns, and it states that evidence is missing when nothing matches. So it shows what each variant's prompt makes possible. Its latency is local pipeline overhead only. Its token and cost columns show what the prompts would cost at the configured prices.
 
@@ -150,6 +151,7 @@ Per-model pricing is not implemented: one price pair covers every allowlisted mo
 - the cost guard: refusal without `--live` or `--max-usd`, refusal when the estimate exceeds the cap, and a mid-run stop;
 - a capped live run through the real adapter with a stubbed `ChatOpenRouter`, checking that the key is never written;
 - a full fake run that produces both report files;
-- error-code-only failure records and the cancellation check.
+- error-code-only failure records and the cancellation check;
+- path restrictions, including symlink escapes, and safe file names.
 
 Both files are listed in `npm test` and `npm run test:unit`.

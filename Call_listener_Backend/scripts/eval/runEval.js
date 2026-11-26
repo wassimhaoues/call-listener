@@ -6,7 +6,7 @@
  * See docs/plan/evaluation.md.
  */
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 import dotenv from "dotenv";
 import { loggers } from "../../server/core/logger/index.js";
@@ -15,9 +15,9 @@ import { FixtureError, loadFixtures } from "./lib/fixtures.js";
 import { runEvaluation } from "./lib/harness.js";
 import { createFakeReplyGenerator, createLiveReplyGenerator } from "./lib/providers.js";
 import { comparisonTable, writeReport } from "./lib/report.js";
+import { BACKEND_ROOT, resolveSafeDirectory, UnsafePathError } from "./lib/safePaths.js";
 import { VARIANT_NAMES } from "./lib/variants.js";
 
-const BACKEND_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const DEFAULT_FIXTURES_DIR = path.join(BACKEND_ROOT, "test/fixtures/eval");
 export const DEFAULT_OUT_DIR = path.join(BACKEND_ROOT, "eval-results");
 
@@ -80,7 +80,11 @@ export async function main(argv, {
       maxUsd: options["max-usd"],
       model: options.model,
     }, env);
-    const { cases, files } = await loadFixtures(options.fixtures || DEFAULT_FIXTURES_DIR);
+    // Check both path options before any model call, so a bad --out cannot
+    // waste a paid run.
+    const outDir = await resolveSafeDirectory(options.out || DEFAULT_OUT_DIR, "--out");
+    const fixturesDir = await resolveSafeDirectory(options.fixtures || DEFAULT_FIXTURES_DIR, "--fixtures");
+    const { cases, files } = await loadFixtures(fixturesDir);
     const generateReply = providerConfig.live
       ? createLiveReplyGenerator(providerConfig, { ChatOpenRouterClass })
       : createFakeReplyGenerator();
@@ -94,7 +98,7 @@ export async function main(argv, {
       clock,
       write,
     });
-    const paths = await writeReport(report, options.out || DEFAULT_OUT_DIR);
+    const paths = await writeReport(report, outDir);
     write([
       comparisonTable(report),
       "",
@@ -105,7 +109,8 @@ export async function main(argv, {
     ].join("\n"));
     return 0;
   } catch (error) {
-    if (error instanceof EvalConfigError || error instanceof FixtureError || String(error?.code).startsWith("ERR_PARSE_ARGS")) {
+    const refused = [EvalConfigError, FixtureError, UnsafePathError].some((type) => error instanceof type);
+    if (refused || String(error?.code).startsWith("ERR_PARSE_ARGS")) {
       writeError(`eval: ${error.message}\n`);
       return 2;
     }

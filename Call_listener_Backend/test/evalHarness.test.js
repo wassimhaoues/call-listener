@@ -1,12 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, realpath, rm, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { EvalConfigError, resolveProviderConfig } from "../scripts/eval/lib/costGuard.js";
 import { FixtureError, loadFixtures, QUESTION_TYPES, validateCase, validateSuite } from "../scripts/eval/lib/fixtures.js";
 import { checkCancellation, planJobs, runEvaluation } from "../scripts/eval/lib/harness.js";
 import { createFakeReplyGenerator, fakeAnswer, parsePromptEvidence } from "../scripts/eval/lib/providers.js";
+import { assertSafeFileName, BACKEND_ROOT, resolveSafeDirectory, safeJoin, UnsafePathError } from "../scripts/eval/lib/safePaths.js";
 import { buildChainPrompt, createChainVariant, createGraphVariant } from "../scripts/eval/lib/variants.js";
 import { DEFAULT_FIXTURES_DIR, main } from "../scripts/eval/runEval.js";
 
@@ -281,4 +282,37 @@ test("the cancellation check fails a variant that never reaches the provider", a
   const ignoresProvider = { name: "broken", run: async () => ({ suggestion: "late", promptEvidence: [], prompt: "" }) };
   const failing = await checkCancellation(ignoresProvider, job, 20);
   assert.equal(failing.passed, false);
+});
+
+test("path options must stay inside the backend root or the OS temp directory", async (t) => {
+  const outside = path.resolve(BACKEND_ROOT, "..", "eval-outside");
+  for (const args of [["--out", outside], ["--fixtures", outside], ["--out", path.parse(BACKEND_ROOT).root]]) {
+    const stderr = capture();
+    const code = await main(args, { env: {}, write: () => {}, writeError: stderr.write });
+    assert.equal(code, 2, args.join(" "));
+    assert.match(stderr.text(), /must be inside/);
+  }
+  await assert.rejects(resolveSafeDirectory(path.join(BACKEND_ROOT, "..", ".."), "--out"), UnsafePathError);
+  const inside = await tempDir(t);
+  assert.equal(await resolveSafeDirectory(inside, "--out"), await realpath(inside));
+});
+
+test("a symlink inside an allowed root cannot redirect reads or writes outside it", async (t) => {
+  const dir = await tempDir(t);
+  const link = path.join(dir, "escape");
+  try {
+    await symlink(path.parse(BACKEND_ROOT).root, link, "dir");
+  } catch {
+    t.skip("symlinks are not available on this platform");
+    return;
+  }
+  await assert.rejects(resolveSafeDirectory(link, "--out"), /resolves outside/);
+});
+
+test("report and fixture file names are checked against a safe pattern", () => {
+  assert.equal(assertSafeFileName("2026-01-02T03-04-05Z-fake.json"), "2026-01-02T03-04-05Z-fake.json");
+  for (const name of ["../x.json", "a/b.json", "a\\b.json", "..", "", ".hidden", "x..json"]) {
+    assert.throws(() => assertSafeFileName(name), UnsafePathError, name);
+  }
+  assert.throws(() => safeJoin(BACKEND_ROOT, "../package.json"), UnsafePathError);
 });

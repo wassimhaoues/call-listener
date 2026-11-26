@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import path from "node:path";
+import { assertSafeFileName, resolveSafeDirectory, safeJoin } from "./safePaths.js";
 
 const METRIC_ROWS = [
   ["Questions (completed / errors / skipped)", (agg) => [agg.completed, agg.errors, agg.skipped].join(" / ")],
@@ -102,13 +102,19 @@ export function renderMarkdown(report) {
   return `${lines.join("\n")}\n`;
 }
 
-/** Write `<stamp>-<provider>.json` and `.md` under `outDir`; returns both paths. */
+/**
+ * Write `<stamp>-<provider>.json` and `.md` under `outDir`, which must be
+ * inside the backend root or the OS temp directory; returns both paths.
+ */
 export async function writeReport(report, outDir) {
-  await mkdir(outDir, { recursive: true });
+  const requested = await resolveSafeDirectory(outDir, "--out");
+  await mkdir(requested, { recursive: true });
+  // Re-check after creation so a symlinked parent cannot redirect the write.
+  const directory = await resolveSafeDirectory(requested, "--out");
   const stamp = report.generatedAt.replaceAll(":", "-").replace(/\.\d+Z$/, "Z");
-  const base = path.join(outDir, `${stamp}-${report.provider}`);
-  const jsonPath = `${base}.json`;
-  const markdownPath = `${base}.md`;
+  const base = assertSafeFileName([stamp, report.provider].join("-"));
+  const jsonPath = safeJoin(directory, `${base}.json`);
+  const markdownPath = safeJoin(directory, `${base}.md`);
   await writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   await writeFile(markdownPath, renderMarkdown(report), "utf8");
   return { jsonPath, markdownPath };

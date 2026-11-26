@@ -141,3 +141,11 @@ test("aggregation counts only completed answers toward quality rates", () => {
   assert.equal(aggregate.inputTokens, 150);
   assert.ok(Math.abs(aggregate.costUsd - 0.0015) < 1e-12);
 });
+
+test("sentence counting is a linear scan that ignores decimals and repeated terminators", () => {
+  assert.equal(countSentences(""), 0);
+  assert.equal(countSentences("No terminator at all"), 1);
+  assert.equal(countSentences("Wait... what?! Really."), 3);
+  assert.equal(countSentences("Version 2.5 shipped.Then more"), 1);
+  assert.equal(countSentences("a".repeat(50_000) + "." + "!".repeat(50_000)), 1);
+});

@@ -109,10 +109,30 @@ export function countWords(text) {
 }
 
 /** Sentences end in . ! or ? followed by whitespace or the end of the text. */
+const SENTENCE_END = new Set([".", "!", "?"]);
+
 export function countSentences(text) {
-  return String(text ?? "")
-    .split(/[.!?]+(?:\s|$)/u)
-    .filter((part) => countWords(part) > 0).length;
+  // A single linear scan: a run of terminators ends a sentence only when the
+  // next character is whitespace or the end, so "3.1%" stays one sentence.
+  const value = String(text ?? "");
+  const parts = [];
+  let start = 0;
+  let index = 0;
+  while (index < value.length) {
+    if (!SENTENCE_END.has(value[index])) {
+      index += 1;
+      continue;
+    }
+    let end = index;
+    while (end < value.length && SENTENCE_END.has(value[end])) end += 1;
+    if (end === value.length || /\s/u.test(value[end])) {
+      parts.push(value.slice(start, index));
+      start = end;
+    }
+    index = end;
+  }
+  parts.push(value.slice(start));
+  return parts.filter((part) => countWords(part) > 0).length;
 }
 
 /**
