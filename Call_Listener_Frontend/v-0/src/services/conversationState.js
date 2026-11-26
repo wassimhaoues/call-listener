@@ -26,6 +26,7 @@ export const STATUS = {
   CONNECTION_LOST: "Connection lost",
   AUDIO_GAP: "Reconnected — audio during the interruption was not transcribed",
   SESSION_RESTARTED: "Reconnected — new session started",
+  DEVICE_REVOKED: "Installation disabled",
 };
 
 export const CONNECTION = {
@@ -38,7 +39,14 @@ export const CONNECTION = {
   RECONNECTING: "reconnecting",
   // Reconnection gave up after the resume window; only a manual restart helps.
   LOST: "lost",
+  // The server disabled this installation (close 4003 / HTTP 403
+  // device_revoked). Terminal: reconnecting cannot help.
+  REVOKED: "revoked",
 };
+
+// Connection states after which no generation can finish.
+const isTerminalConnection = (connection) =>
+  connection === CONNECTION.LOST || connection === CONNECTION.REVOKED;
 
 const GENERATION = {
   IDLE: "idle",
@@ -54,6 +62,8 @@ export const BUDGET_REACHED_TEXT =
   "Interview model budget reached. Suggestions are paused.";
 export const UNSUPPORTED_MODEL_TEXT =
   "The AI model chosen in Interview Settings isn't available. Stop the session, pick another model in Interview Settings, and start again.";
+export const DEVICE_REVOKED_TEXT =
+  "This installation has been disabled by the Call Listener service, so it can no longer connect. Contact support if you think this is a mistake.";
 export const CONNECTION_LOST_TEXT =
   "The connection to the server was lost and could not be restored. Start a new session to continue; guidance will not include the earlier conversation.";
 
@@ -135,6 +145,8 @@ export function deriveStatus(state) {
       return STATUS.RECONNECTING;
     case CONNECTION.LOST:
       return STATUS.CONNECTION_LOST;
+    case CONNECTION.REVOKED:
+      return STATUS.DEVICE_REVOKED;
     default:
       break;
   }
@@ -515,7 +527,7 @@ function reduceFacts(state, action) {
       // Any connection change (stop, drop, reconnect) ends in-progress speech
       // lines: their final transcripts, if any, arrive as committed messages.
       // Once reconnection gives up, an in-flight generation can never finish.
-      if (action.connection === CONNECTION.LOST && isGenerationInProgress(state)) {
+      if (isTerminalConnection(action.connection) && isGenerationInProgress(state)) {
         return {
           ...state,
           ...IDLE_GENERATION,
@@ -532,7 +544,7 @@ function reduceFacts(state, action) {
         ...clearInterim(state),
         connection: action.connection,
         pendingAction: null,
-        finalGenerationId: action.connection === CONNECTION.LOST ? null : state.finalGenerationId,
+        finalGenerationId: isTerminalConnection(action.connection) ? null : state.finalGenerationId,
         notice: null,
       };
     case ACTION.CAPTURE_STARTED:

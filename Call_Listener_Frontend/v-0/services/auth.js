@@ -28,6 +28,23 @@ function parseWsTicket(raw) {
   }
 }
 
+/**
+ * A 403 whose JSON body names `device_revoked`: the server disabled this
+ * installation. The error carries `code` for services/authFailure.js and the
+ * code in its message, which is all that crosses IPC to the renderer.
+ */
+function revokedError(statusCode, raw) {
+  if (statusCode !== 403) return null;
+  let code;
+  try {
+    code = JSON.parse(raw)?.error;
+  } catch {
+    return null;
+  }
+  if (code !== "device_revoked") return null;
+  return Object.assign(new Error("device_revoked"), { code: "device_revoked", statusCode });
+}
+
 /** Timeout error classified as server_unreachable by services/authFailure.js. */
 function makeTimeoutError(label, timeoutMs) {
   return Object.assign(new Error(`${label} request timed out after ${timeoutMs} ms`), {
@@ -105,6 +122,8 @@ class AuthManager {
           res.on("data", (d) => (buf += d));
           res.on("end", () => {
             if (res.statusCode !== 200) {
+              const revoked = revokedError(res.statusCode, buf);
+              if (revoked) return reject(revoked);
               return reject(
                 Object.assign(new Error(`Token HTTP ${res.statusCode}: ${buf}`), {
                   statusCode: res.statusCode,
@@ -192,6 +211,8 @@ class AuthManager {
       response = await request();
     }
     if (LEGACY_TICKET_STATUSES.has(response.statusCode)) return wsUrl;
+    const revoked = revokedError(response.statusCode, response.raw);
+    if (revoked) throw revoked;
     if (response.statusCode !== 200) {
       throw Object.assign(new Error(`WebSocket ticket HTTP ${response.statusCode}`), {
         statusCode: response.statusCode,

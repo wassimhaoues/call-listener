@@ -166,3 +166,35 @@ describe("makeSignedWsUrl with WebSocket tickets", () => {
     clearTimeout(auth.refreshTimer);
   });
 });
+
+describe("revoked installations", () => {
+  const { classifyAuthFailure, AUTH_FAILURE } = require("../services/authFailure.js");
+  const revoked = { statusCode: 403, body: { error: "device_revoked" } };
+
+  it("rejects the ticket request with device_revoked and no response body", async () => {
+    const auth = makeAuth(makeScriptedRequestClient([revoked]));
+
+    const error = await auth.makeSignedWsUrl().catch((caught) => caught);
+    expect(error).toMatchObject({ code: "device_revoked", statusCode: 403, message: "device_revoked" });
+    expect(classifyAuthFailure(error)).toBe(AUTH_FAILURE.REVOKED);
+  });
+
+  it("rejects the startup token request with device_revoked", async () => {
+    const auth = makeAuth(makeScriptedRequestClient([revoked]));
+    auth.token = null;
+
+    const error = await auth.ensure().catch((caught) => caught);
+    expect(error).toMatchObject({ code: "device_revoked", message: "device_revoked" });
+    expect(classifyAuthFailure(error)).toBe(AUTH_FAILURE.REVOKED);
+    expect(auth.cookies).toHaveLength(0);
+  });
+
+  it("keeps other 403 answers as generic HTTP failures", async () => {
+    const auth = makeAuth(makeScriptedRequestClient([{ statusCode: 403, body: { error: "forbidden" } }]));
+
+    const error = await auth.makeSignedWsUrl().catch((caught) => caught);
+    expect(error.code).toBeUndefined();
+    expect(error.statusCode).toBe(403);
+    expect(classifyAuthFailure(error)).toBe(AUTH_FAILURE.HTTP);
+  });
+});

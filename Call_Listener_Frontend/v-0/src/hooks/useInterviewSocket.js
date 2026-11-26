@@ -37,6 +37,11 @@ const OPEN_MODE = {
 
 const defaultGetWsUrl = () => window.callApi.getWsUrl();
 
+// The server closes a revoked installation's socket with 4003; the ticket
+// request fails with a `device_revoked` error (only its message crosses IPC).
+export const DEVICE_REVOKED_CLOSE_CODE = 4003;
+const isRevokedError = (error) => String(error?.message ?? error ?? "").includes("device_revoked");
+
 const emptyResume = () => ({ sessionId: null, lastSeq: 0 });
 const idleReconnect = () => ({ startedAt: null, attempt: 0, timer: null });
 
@@ -148,6 +153,16 @@ export function useInterviewSocket({
     emit(connectionChanged(CONNECTION.LOST));
   }, [emit, resetReconnect]);
 
+  // The installation was disabled: stop retrying and forget the session.
+  const revoke = useCallback(() => {
+    resetReconnect();
+    resumeRef.current = emptyResume();
+    wsRef.current = null;
+    readyRef.current = false;
+    awaitingResumeRef.current = false;
+    emit(connectionChanged(CONNECTION.REVOKED));
+  }, [emit, resetReconnect]);
+
   const scheduleReconnect = useCallback(() => {
     const { now: clock, random: jitter } = optionsRef.current;
     const reconnect = reconnectRef.current;
@@ -199,8 +214,10 @@ export function useInterviewSocket({
       try {
         // A fresh URL per attempt, so an expired credential is replaced.
         wsUrl = await optionsRef.current.getWsUrl();
-      } catch {
-        fail();
+      } catch (error) {
+        if (ended()) return;
+        if (isRevokedError(error)) revoke();
+        else fail();
         return;
       }
       if (ended()) return;
@@ -225,8 +242,10 @@ export function useInterviewSocket({
         }
         startSession(ws, { restarted: mode === OPEN_MODE.RECONNECT });
       };
-      ws.onclose = () => {
-        if (isCurrent()) handleClose();
+      ws.onclose = (event) => {
+        if (!isCurrent()) return;
+        if (event?.code === DEVICE_REVOKED_CLOSE_CODE) revoke();
+        else handleClose();
       };
       ws.onerror = () => {
         // Failed attempts are reported by the reconnect status, not as errors.
@@ -246,7 +265,7 @@ export function useInterviewSocket({
         emit(serverMessageReceived(message));
       };
     },
-    [emit, handleClose, handleResumeAnswer, scheduleReconnect, startSession, trackSequence]
+    [emit, handleClose, handleResumeAnswer, revoke, scheduleReconnect, startSession, trackSequence]
   );
   openSocketRef.current = openSocket;
 

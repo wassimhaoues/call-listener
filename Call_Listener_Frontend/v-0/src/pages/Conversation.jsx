@@ -21,6 +21,7 @@ import {
   captureStarted,
   CONNECTION,
   CONNECTION_LOST_TEXT,
+  DEVICE_REVOKED_TEXT,
   conversationReducer,
   initialConversationState,
   noticeShown,
@@ -274,6 +275,7 @@ export default function Conversation() {
   }, []);
 
   const connectionLost = state.connection === CONNECTION.LOST;
+  const deviceRevoked = state.connection === CONNECTION.REVOKED;
   const alerts = [
     state.captureError,
     state.modelUnavailable ? UNSUPPORTED_MODEL_TEXT : "",
@@ -296,6 +298,14 @@ export default function Conversation() {
 
   return (
     <div className="h-full flex flex-col">
+      {deviceRevoked && (
+        <div
+          className="mb-3 rounded-xl border border-[var(--danger)] px-3 py-2 text-sm text-[var(--danger)]"
+          role="alert"
+        >
+          <p>{DEVICE_REVOKED_TEXT}</p>
+        </div>
+      )}
       {connectionLost && (
         <div
           className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--danger)] px-3 py-2 text-sm text-[var(--danger)]"

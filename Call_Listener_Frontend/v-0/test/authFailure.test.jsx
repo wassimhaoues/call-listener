@@ -110,4 +110,10 @@ describe("AuthError page", () => {
     expect(authErrorCopy("http").body).toMatch(/returned an error/);
     expect(authErrorCopy("bogus").title).toBe("You're offline");
   });
+
+  it("explains a disabled installation", () => {
+    expect(classifyAuthFailure(Object.assign(new Error("device_revoked"), { code: "device_revoked", statusCode: 403 })))
+      .toBe(AUTH_FAILURE.REVOKED);
+    expect(authErrorCopy("revoked").title).toBe("This installation has been disabled");
+  });
 });
