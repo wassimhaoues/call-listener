@@ -129,12 +129,11 @@ export function startWebSocketServer({
   // The handshake itself always completes; a rejected connection is then
   // closed with its documented code and reason.
   const verifyClient = (info, done) => {
-    authenticateUpgrade(info.req, { config, wsTickets })
-      .catch(() => rejected(4001, "auth_failed"))
-      .then((result) => {
-        info.req.callAuth = result;
-        done(true);
-      });
+    const accept = (result) => {
+      info.req.callAuth = result;
+      done(true);
+    };
+    authenticateUpgrade(info.req, { config, wsTickets }).then(accept, () => accept(rejected(4001, "auth_failed")));
   };
   const wss = new WebSocketServer({ port, maxPayload: MAX_WS_MESSAGE_BYTES, verifyClient });
   log.info(`🚀 WebSocket server listening on port ${port}`);
