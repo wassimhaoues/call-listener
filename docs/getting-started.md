@@ -54,6 +54,8 @@ Stop all three processes with `Ctrl+C` when finished. Do not use the sample pass
 
 OpenRouter sessions default to `MAX_INTERVIEW_COST_USD=5`, `OPENROUTER_MAX_OUTPUT_TOKENS=600`, and `OPENROUTER_REQUEST_TIMEOUT_MS=10000`. The server records provider-reported input/output token usage per ephemeral session and stops future suggestions after the cost ceiling. `OPENROUTER_INPUT_USD_PER_MILLION_TOKENS=0.2` and `OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS=1.2` are the configured prices for the initial model; update those values with an approved model-price change before switching models. Do not enable automatic provider retries until requests have an idempotency design.
 
+Resumable sessions (clients sending the `resume` capability) are held in process memory for `RESUME_WINDOW_MS` (default `120000`) after a disconnect, with at most `MAX_DISCONNECTED_SESSIONS_PER_OWNER` (default `3`) held per installation.
+
 For a distributable Windows installer, run `npm run build`. Do not edit `dist/`, the installer, or bundled tools in `bin/` by hand.
 
 ## Verification checklist

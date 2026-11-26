@@ -438,3 +438,61 @@ test("a purge failure on expiry is logged, not thrown", async () => {
   assert.equal(errors.length, 1);
   assert.equal(session.state, SESSION_STATE.EXPIRED);
 });
+
+// --- Per-owner cap on disconnected sessions ----------------------------------
+
+test("an owner keeps at most maxDisconnectedPerOwner disconnected sessions; the oldest is purged", async () => {
+  const purged = [];
+  let clock = 1_000;
+  const manager = createSessionManager({
+    createStreamManager: () => ({ closeAll: async () => {}, pause: async () => {} }),
+    purgeSession: async (id) => purged.push(id),
+    maxDisconnectedPerOwner: 2,
+    now: () => clock,
+    timers: { setTimeout: () => ({}), clearTimeout: () => {} },
+    log: silentLog,
+  });
+  const owner = { app_id: "app", device_id: "device-a" };
+  const other = { app_id: "app", device_id: "device-b" };
+  const fakeSocket = () => ({ readyState: 1, OPEN: 1, send() {}, close() {} });
+
+  const open = (user) => {
+    const socket = fakeSocket();
+    const session = manager.create(user, socket);
+    manager.enableResume(session);
+    return { session, socket };
+  };
+  const a = open(owner);
+  const b = open(owner);
+  const c = open(owner);
+  const foreign = open(other);
+
+  for (const { session, socket } of [a, b, foreign]) {
+    clock += 10;
+    await manager.disconnect(session, socket);
+  }
+  assert.deepEqual(purged, []);
+
+  clock += 10;
+  await manager.disconnect(c.session, c.socket);
+
+  assert.deepEqual(purged, [a.session.id], "only the owner's oldest disconnected session is purged");
+  assert.equal(manager.get(a.session.id), undefined);
+  assert.equal(manager.get(b.session.id).state, SESSION_STATE.DISCONNECTED);
+  assert.equal(manager.get(c.session.id).state, SESSION_STATE.DISCONNECTED);
+  assert.equal(manager.get(foreign.session.id).state, SESSION_STATE.DISCONNECTED);
+});
+
+test("maxDisconnectedPerOwner must be a positive integer", () => {
+  for (const bad of [0, -1, 1.5, Number.NaN]) {
+    assert.throws(
+      () =>
+        createSessionManager({
+          createStreamManager: () => ({}),
+          purgeSession: async () => {},
+          maxDisconnectedPerOwner: bad,
+        }),
+      /maxDisconnectedPerOwner/
+    );
+  }
+});
