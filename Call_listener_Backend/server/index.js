@@ -28,12 +28,6 @@ const modelCatalog = createModelCatalog({
   onRefresh: (models) => modelPricing.warnIfBelowCatalog(models),
   log: loggers.ai,
 });
-if (CONFIG.AI_PROVIDER === "openrouter") {
-  // One early catalog lookup so an underpriced model is reported at startup.
-  modelCatalog.getCatalog().catch((error) => {
-    loggers.ai.warn("Startup model catalog lookup failed: %s", error?.message || "unknown error");
-  });
-}
 const preparationBrief = createConfiguredPreparationBrief({
   config: CONFIG,
   redisClient: redis,
@@ -69,3 +63,9 @@ process.on("unhandledRejection", (e) => {
   log.error("Unhandled rejection: %o", e);
   shutdown("unhandledRejection");
 });
+
+if (CONFIG.AI_PROVIDER === "openrouter") {
+  // One catalog lookup once the servers are up, so an underpriced model is
+  // reported at startup. getCatalog never rejects; a failed lookup is logged.
+  await modelCatalog.getCatalog();
+}

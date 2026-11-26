@@ -118,13 +118,13 @@ export function createModelPricing({ prices, defaultModel = null, defaultPrice, 
  * validated by server/config/modelPrices.js), with the single-price pair as
  * the default model's price when the table does not list it.
  */
-export function createConfiguredPricing(config = {}, log) {
+export function createConfiguredPricing(config, log) {
   return createModelPricing({
-    prices: config.OPENROUTER_MODEL_PRICES,
-    defaultModel: config.OPENROUTER_MODEL,
+    prices: config?.OPENROUTER_MODEL_PRICES,
+    defaultModel: config?.OPENROUTER_MODEL,
     defaultPrice: {
-      inputUsdPerMillionTokens: config.OPENROUTER_INPUT_USD_PER_MILLION_TOKENS,
-      outputUsdPerMillionTokens: config.OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS,
+      inputUsdPerMillionTokens: config?.OPENROUTER_INPUT_USD_PER_MILLION_TOKENS,
+      outputUsdPerMillionTokens: config?.OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS,
     },
     log,
   });

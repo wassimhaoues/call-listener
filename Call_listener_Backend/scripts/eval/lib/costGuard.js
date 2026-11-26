@@ -60,7 +60,7 @@ export function resolvePricing(env = {}, { requiredModels = [] } = {}) {
 }
 
 /** Configured per-million prices of `model` (default: the default model). */
-export function resolvePrices(env = {}, model) {
+export function resolvePrices(env, model) {
   const pricing = resolvePricing(env, { requiredModels: model ? [model] : [] });
   return toEvalPrices(pricing.priceFor(model));
 }

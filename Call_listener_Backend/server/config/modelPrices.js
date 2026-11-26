@@ -5,7 +5,7 @@ export const MAX_MODEL_PRICES_LENGTH = 16_384;
 export const MAX_PRICED_MODELS = 50;
 // Sanity ceiling: no chat model costs anywhere near $10,000 per million tokens.
 export const MAX_USD_PER_MILLION_TOKENS = 10_000;
-const PRICE_FIELDS = ["input", "output"];
+const PRICE_FIELDS = new Set(["input", "output"]);
 
 function isPlainObject(value) {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -15,7 +15,7 @@ function parsePrice(modelId, entry) {
   if (!isPlainObject(entry)) {
     throw new Error(`${ENV_NAME} entry for ${modelId} must be an object with input and output prices`);
   }
-  const unknown = Object.keys(entry).filter((key) => !PRICE_FIELDS.includes(key));
+  const unknown = Object.keys(entry).filter((key) => !PRICE_FIELDS.has(key));
   if (unknown.length) {
     throw new Error(`${ENV_NAME} entry for ${modelId} accepts only input and output`);
   }
