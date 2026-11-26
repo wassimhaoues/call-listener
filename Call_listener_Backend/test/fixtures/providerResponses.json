@@ -69,6 +69,26 @@
     "lateIntro": {
       "kind": "deferred",
       "content": "This introduction arrives after the session ended."
+    },
+    "shortenedAnswer": {
+      "kind": "stream",
+      "chunks": ["I led our billing migration ", "with staged dual writes and zero data loss."],
+      "usage_metadata": { "input_tokens": 1300, "output_tokens": 20, "total_tokens": 1320 }
+    },
+    "starDetail": {
+      "kind": "stream",
+      "chunks": ["Situation: a legacy billing database.\n", "Task: migrate without downtime.\n", "Action: staged dual writes.\n", "Result: zero data loss."],
+      "usage_metadata": { "input_tokens": 1400, "output_tokens": 70, "total_tokens": 1470 }
+    },
+    "clarifyingQuestions": {
+      "kind": "success",
+      "content": "Do you mean the database move or the service cutover? — clarifies: which migration to describe",
+      "usage_metadata": { "input_tokens": 1250, "output_tokens": 25, "total_tokens": 1275 }
+    },
+    "regeneratedAnswer": {
+      "kind": "stream",
+      "chunks": ["We rehearsed the cutover ", "and kept a tested rollback."],
+      "usage_metadata": { "input_tokens": 1150, "output_tokens": 25, "total_tokens": 1175 }
     }
   },
   "cases": [

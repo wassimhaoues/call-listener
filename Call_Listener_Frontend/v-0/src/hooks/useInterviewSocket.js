@@ -13,6 +13,7 @@ import {
   encodeContextMessage,
   encodeEndMessage,
   encodeInterviewerQuestionMessage,
+  encodeResponseActionMessage,
   encodeResumeMessage,
 } from "@/services/interviewMessages.js";
 import { nextReconnectDelay, randomFraction } from "@/services/reconnectPolicy.js";
@@ -294,6 +295,17 @@ export function useInterviewSocket({
     [isOpen]
   );
 
+  // Asks the server to regenerate/shorten/expand/clarify the suggestion of
+  // `generationId`. Returns false without sending when the session is not live.
+  const sendResponseAction = useCallback(
+    (type, generationId) => {
+      if (!isOpen()) return false;
+      wsRef.current.send(encodeResponseActionMessage(type, generationId));
+      return true;
+    },
+    [isOpen]
+  );
+
   // Sends `{ end: true }` and closes. Idempotent: later calls are no-ops, a
   // connect() still waiting for its URL will not open a socket, and any
   // pending reconnect is cancelled.
@@ -321,6 +333,7 @@ export function useInterviewSocket({
     isOpen,
     sendAudioChunk,
     sendInterviewerQuestion,
+    sendResponseAction,
     end,
     startNewSession,
   };

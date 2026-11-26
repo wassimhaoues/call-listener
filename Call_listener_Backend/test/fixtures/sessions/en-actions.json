@@ -1,0 +1,143 @@
+{
+  "id": "en-actions-v1",
+  "description": "Synthetic English interview from a streaming client that uses candidate response actions: shorten and expand transform the latest final answer, a stale generation ID is rejected, clarify produces interviewer questions, regenerate supersedes an answer still streaming, and a malformed action is an invalid message.",
+  "harness": {},
+  "steps": [
+    {
+      "label": "streaming client context gets the usual intro",
+      "type": "context",
+      "context": "validEn",
+      "capabilities": ["stream", "actions"],
+      "provider": "introSuccess",
+      "expect": [{ "ai_reply": "Open with your billing migration: scope, risk, and the zero-data-loss result.", "model": { "selected": "fixture/model", "actual": null } }]
+    },
+    {
+      "label": "question 1 streams an answer",
+      "type": "typed",
+      "text": "Tell me about a time you led a migration.",
+      "provider": "streamedAnswer",
+      "expect": [
+        { "speaker": "caller", "transcript": "Tell me about a time you led a migration." },
+        { "generation": { "id": "g1", "kind": "answer", "state": "thinking" } },
+        { "generation": { "id": "g1", "kind": "answer", "state": "streaming" }, "delta": "Situation: a legacy billing database. Action: staged dual writes.  " },
+        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes.", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g1", "kind": "answer", "state": "done" } }
+      ]
+    },
+    {
+      "label": "shorten transforms the final answer, quoted as data",
+      "type": "action",
+      "action": "shorten",
+      "generationId": "g1",
+      "provider": "shortenedAnswer",
+      "providerPromptIncludes": [
+        "Candidate request: Rewrite the previous suggested answer",
+        "No more than three short sentences",
+        "Interviewer question: \"Tell me about a time you led a migration.\"",
+        "Previous suggested answer: \"Situation: a legacy billing database. Action: staged dual writes.\"",
+        "Led a synthetic billing-service migration"
+      ],
+      "expect": [
+        { "generation": { "id": "g2", "kind": "shorten", "state": "thinking" } },
+        { "generation": { "id": "g2", "kind": "shorten", "state": "streaming" }, "delta": "I led our billing migration with staged dual writes and zero data loss." },
+        { "ai_reply": "I led our billing migration with staged dual writes and zero data loss.", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g2", "kind": "shorten", "state": "done" } }
+      ]
+    },
+    {
+      "label": "an action naming a superseded generation is rejected without a model call",
+      "type": "action",
+      "action": "expand",
+      "generationId": "g1",
+      "expect": [{ "error": "action_rejected", "reason": "stale_generation" }]
+    },
+    {
+      "label": "expand turns the latest answer into STAR detail",
+      "type": "action",
+      "action": "expand",
+      "generationId": "g2",
+      "provider": "starDetail",
+      "providerPromptIncludes": [
+        "Use the headings Situation, Task, Action, and Result",
+        "write that it is missing instead of inventing it",
+        "Previous suggested answer: \"I led our billing migration with staged dual writes and zero data loss.\""
+      ],
+      "expect": [
+        { "generation": { "id": "g3", "kind": "expand", "state": "thinking" } },
+        { "generation": { "id": "g3", "kind": "expand", "state": "streaming" }, "delta": "Situation: a legacy billing database.\nTask: migrate without downtime.\nAction: staged dual writes.\nResult: zero data loss." },
+        { "ai_reply": "Situation: a legacy billing database.\nTask: migrate without downtime.\nAction: staged dual writes.\nResult: zero data loss.", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g3", "kind": "expand", "state": "done" } }
+      ]
+    },
+    {
+      "label": "clarify suggests questions for the interviewer",
+      "type": "action",
+      "action": "clarify",
+      "generationId": "g3",
+      "provider": "clarifyingQuestions",
+      "providerPromptIncludes": ["Suggest clarifying questions", "Do not answer it."],
+      "providerPromptExcludes": ["Previous suggested answer"],
+      "expect": [
+        { "generation": { "id": "g4", "kind": "clarify", "state": "thinking" } },
+        { "generation": { "id": "g4", "kind": "clarify", "state": "streaming" }, "delta": "Do you mean the database move or the service cutover? — clarifies: which migration to describe" },
+        { "ai_reply": "Do you mean the database move or the service cutover? — clarifies: which migration to describe", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g4", "kind": "clarify", "state": "done" } }
+      ]
+    },
+    {
+      "label": "question 2 is still streaming",
+      "type": "typed",
+      "text": "How did you keep the cutover safe?",
+      "provider": "streamThenHang",
+      "waitFor": "providerStreamed",
+      "expect": [
+        { "speaker": "caller", "transcript": "How did you keep the cutover safe?" },
+        { "generation": { "id": "g5", "kind": "answer", "state": "thinking" } }
+      ]
+    },
+    {
+      "label": "regenerate supersedes the answer in flight; its buffered tokens are dropped",
+      "type": "action",
+      "action": "regenerate",
+      "generationId": "g5",
+      "provider": "regeneratedAnswer",
+      "providerPromptIncludes": ["Write a fresh answer", "Interviewer question: \"How did you keep the cutover safe?\""],
+      "providerPromptExcludes": ["Previous suggested answer"],
+      "expect": [
+        { "generation": { "id": "g6", "kind": "regenerate", "state": "thinking" } },
+        { "generation": { "id": "g6", "kind": "regenerate", "state": "streaming" }, "delta": "We rehearsed the cutover and kept a tested rollback." },
+        { "ai_reply": "We rehearsed the cutover and kept a tested rollback.", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g6", "kind": "regenerate", "state": "done" } }
+      ]
+    },
+    {
+      "label": "an unknown action type is an invalid message",
+      "type": "raw",
+      "data": "{\"action\":{\"type\":\"translate\",\"generationId\":\"g6\"}}",
+      "expect": [{ "error": "Invalid message" }]
+    },
+    { "label": "end", "type": "end", "expect": [] }
+  ],
+  "final": {
+    "streams": [],
+    "storedTranscriptionLanguage": "en",
+    "history": [
+      ["caller", "Tell me about a time you led a migration."],
+      ["assistant", "Situation: a legacy billing database. Action: staged dual writes."],
+      ["caller", "How did you keep the cutover safe?"]
+    ],
+    "providerCalls": [
+      { "name": "introSuccess", "status": "resolved" },
+      { "name": "streamedAnswer", "status": "resolved" },
+      { "name": "shortenedAnswer", "status": "resolved" },
+      { "name": "starDetail", "status": "resolved" },
+      { "name": "clarifyingQuestions", "status": "resolved" },
+      { "name": "streamThenHang", "status": "rejected" },
+      { "name": "regeneratedAnswer", "status": "resolved" }
+    ],
+    "usage": [
+      { "input_tokens": 900, "output_tokens": 60, "total_tokens": 960 },
+      { "input_tokens": 1100, "output_tokens": 30, "total_tokens": 1130 },
+      { "input_tokens": 1300, "output_tokens": 20, "total_tokens": 1320 },
+      { "input_tokens": 1400, "output_tokens": 70, "total_tokens": 1470 },
+      { "input_tokens": 1250, "output_tokens": 25, "total_tokens": 1275 },
+      { "input_tokens": 1150, "output_tokens": 25, "total_tokens": 1175 }
+    ],
+    "spentUsd": 0.001696
+  }
+}

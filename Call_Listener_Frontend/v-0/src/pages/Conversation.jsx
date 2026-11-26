@@ -15,6 +15,7 @@ import {
   getDeviceSelectionError,
 } from "@/services/audioCapture.js";
 import {
+  canRequestResponseAction,
   captureFailed,
   captureStarted,
   CONNECTION,
@@ -23,6 +24,7 @@ import {
   initialConversationState,
   noticeShown,
   pauseChanged,
+  responseActionSent,
   STATUS,
   typedQuestionSubmitted,
   UNSUPPORTED_MODEL_TEXT,
@@ -71,6 +73,18 @@ export default function Conversation() {
     }
     dispatch(typedQuestionSubmitted(question));
     socket.sendInterviewerQuestion(question);
+  }
+
+  const actionsEnabled = canRequestResponseAction(state);
+
+  // Regenerate / shorten / expand / clarify the current final suggestion.
+  function requestResponseAction(type) {
+    if (!actionsEnabled || pausedRef.current) return;
+    if (!socket.sendResponseAction(type, state.finalGenerationId)) {
+      dispatch(noticeShown(STATUS.CONNECTION_UNAVAILABLE));
+      return;
+    }
+    dispatch(responseActionSent(type));
   }
 
   function togglePause() {
@@ -221,6 +235,11 @@ export default function Conversation() {
               isStreaming={state.isStreaming}
               model={state.model}
               alerts={alerts}
+              generationKind={state.generationKind}
+              actionsEnabled={actionsEnabled}
+              pendingAction={state.pendingAction}
+              actionError={state.actionError}
+              onResponseAction={requestResponseAction}
               onSubmitTypedQuestion={
                 systemAudioEnabled ? undefined : submitTypedInterviewerQuestion
               }
