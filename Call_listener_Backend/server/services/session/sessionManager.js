@@ -30,6 +30,14 @@ function isSameOwner(a, b) {
   return Boolean(a.appId && a.deviceId) && a.appId === b.appId && a.deviceId === b.deviceId;
 }
 
+/** Opt a session into sequencing and resume. Returns true the first time only. */
+function enableResume(session) {
+  if (session.resumable) return false;
+  session.resumable = true;
+  session.channel.enableSequencing();
+  return true;
+}
+
 /**
  * In-memory registry of live interview sessions and their lifecycle:
  *
@@ -87,14 +95,6 @@ export function createSessionManager({
     };
     sessions.set(id, session);
     return session;
-  }
-
-  /** Opt a session into sequencing and resume. Returns true the first time only. */
-  function enableResume(session) {
-    if (session.resumable) return false;
-    session.resumable = true;
-    session.channel.enableSequencing();
-    return true;
   }
 
   function clearExpiry(session) {

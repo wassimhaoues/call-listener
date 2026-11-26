@@ -32,6 +32,18 @@ function sendDirect(wsClient, payload) {
   if (wsClient.readyState === wsClient.OPEN) wsClient.send(JSON.stringify(payload));
 }
 
+/** Session-lifecycle hooks the message handler calls for `session`. */
+function sessionHooks(sessions, session) {
+  return {
+    onContextAccepted: ({ resume }) => {
+      if (resume && sessions.enableResume(session)) {
+        session.channel.sendControl({ session: { id: session.id } });
+      }
+    },
+    onEnd: () => sessions.end(session),
+  };
+}
+
 /**
  * Bind authenticated sockets to sessions. Each connection either resumes an
  * existing session (its first frame is `{ resume }`) or lazily creates a new
@@ -65,17 +77,6 @@ export function createConnectionHandler({
       session = result.session;
     }
 
-    function hooksFor(current) {
-      return {
-        onContextAccepted: ({ resume }) => {
-          if (resume && sessions.enableResume(current)) {
-            current.channel.sendControl({ session: { id: current.id } });
-          }
-        },
-        onEnd: () => sessions.end(current),
-      };
-    }
-
     wsClient.on("message", async (data) => {
       if (awaitingFirstFrame) {
         awaitingFirstFrame = false;
@@ -97,7 +98,7 @@ export function createConnectionHandler({
         sessionId: current.id,
         data,
         streamManager: current.streamManager,
-        ...hooksFor(current),
+        ...sessionHooks(sessions, current),
       });
     });
 

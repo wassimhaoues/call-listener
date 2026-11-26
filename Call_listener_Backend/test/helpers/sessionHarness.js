@@ -54,6 +54,21 @@ export function createControlledGenerator() {
   };
 }
 
+/** Let `count` event-loop turns run, one after another. */
+export function flushTurns(count) {
+  return Array.from({ length: count }).reduce((previous) => previous.then(() => nextTurn()), Promise.resolve());
+}
+
+/** Poll `predicate` once per event-loop turn, failing after a hang guard. */
+export async function waitUntil(predicate, description, startedAt = Date.now()) {
+  if (predicate()) return;
+  if (Date.now() - startedAt > WAIT_GUARD_MS) throw new Error(`Timed out waiting for ${description}`);
+  await nextTurn();
+  return waitUntil(predicate, description, startedAt);
+}
+
+const settle = () => flushTurns(10);
+
 /** Manually fired replacement for setTimeout/clearTimeout. */
 export function createManualTimers() {
   const scheduled = [];
@@ -73,7 +88,7 @@ export function createManualTimers() {
         timer.fired = true;
         timer.fn();
       }
-      for (let turn = 0; turn < 10; turn += 1) await nextTurn();
+      await flushTurns(10);
     },
   };
 }
@@ -168,18 +183,6 @@ export function createSessionHarness({ resumeWindowMs = 120_000, replayLimits } 
     const socket = new FakeServerSocket(user);
     handleConnection(socket);
     return socket;
-  }
-
-  async function waitUntil(predicate, description) {
-    const startedAt = Date.now();
-    while (!predicate()) {
-      if (Date.now() - startedAt > WAIT_GUARD_MS) throw new Error(`Timed out waiting for ${description}`);
-      await nextTurn();
-    }
-  }
-
-  async function settle() {
-    for (let turn = 0; turn < 10; turn += 1) await nextTurn();
   }
 
   /**
