@@ -8,6 +8,7 @@ import { createModelCatalog } from "./services/ai/modelCatalog.js";
 import { createConfiguredPricing } from "./services/ai/modelPricing.js";
 import { createConfiguredPreparationBrief } from "./services/preparation/configuredPreparation.js";
 import { createWsTicketStore } from "./services/auth/wsTicketStore.js";
+import { createDeviceRevocation } from "./services/auth/deviceRevocation.js";
 import fs from "fs";
 import path from "path";
 const logsDir = path.join(process.cwd(), "logs");
@@ -16,11 +17,19 @@ if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 const log = loggers.core;
 // One store for both servers: Express issues tickets, the socket consumes them.
 const wsTickets = createWsTicketStore({ redisClient: redis, ttlSeconds: CONFIG.WS_TICKET_TTL_SECONDS });
+// One operator deny-list for HTTP and the socket (scripts/admin/deviceRevocation.js).
+const deviceRevocation = createDeviceRevocation({
+  redisClient: redis,
+  failClosed: CONFIG.REVOCATION_FAIL_CLOSED,
+  log: loggers.core,
+});
 const wss = startWebSocketServer({
   port: CONFIG.PORT,
   config: CONFIG,
   handleAuthenticatedConnection: handleConnection,
   wsTickets,
+  deviceRevocation,
+  revocationSweepMs: CONFIG.REVOCATION_SWEEP_MS,
 });
 const modelPricing = createConfiguredPricing(CONFIG, loggers.ai);
 const modelCatalog = createModelCatalog({
@@ -43,6 +52,7 @@ const app = createApp({
   modelCatalog,
   preparationBrief,
   wsTickets,
+  deviceRevocation,
   log: loggers.core,
 });
 app.listen(CONFIG.EXPRESS_PORT, () => {

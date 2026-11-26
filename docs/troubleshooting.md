@@ -6,7 +6,7 @@
 
 ## Authentication or socket failure
 
-Confirm the backend `APP_ID` matches `com.coworky.calllistener`, the desktop points at the intended `CALL_HOST`, and HTTPS/WSS certificates are valid. A rejected WebSocket closes with code `4001`; obtain a new token through `/auth/token` and inspect backend WebSocket logs. Do not attempt to work around the failure by exposing the JWT to renderer code.
+Confirm the backend `APP_ID` matches `com.coworky.calllistener`, the desktop points at the intended `CALL_HOST`, and HTTPS/WSS certificates are valid. A rejected WebSocket closes with code `4001`; `4003 device_revoked` (or HTTP `403 device_revoked`) means an operator revoked this installation, see [Revoking an installation](deployment.md#revoking-an-installation). For `4001`, obtain a new token through `/auth/token` and inspect backend WebSocket logs. Do not attempt to work around the failure by exposing the JWT to renderer code.
 
 If Electron reports `ERR_TLS_CERT_ALTNAME_INVALID`, inspect the certificate served for the exact `CALL_HOST`. For example, `call.coworky.org` must be covered by the certificate's Subject Alternative Name; a certificate for the VPS hostname is not valid for the application domain. Correct the Traefik router/certificate resolver and DNS on the deployment host, then verify `https://call.coworky.org/health` before retrying. Do not disable certificate validation or switch the client to the VPS hostname as a workaround.
 

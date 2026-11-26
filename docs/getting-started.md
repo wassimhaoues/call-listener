@@ -60,6 +60,8 @@ WebSocket tickets: `WS_TICKET_TTL_SECONDS` (default `30`, 1–300) is how long a
 
 `POST /auth/token` allows `AUTH_RATE_LIMIT_PER_MINUTE` (default `20`) requests per client IP per minute. Set `TRUST_PROXY_HOPS` to the number of reverse proxies in front of Express (default `0`; `1` behind Traefik) so limits apply per client.
 
+Device revocation: `REVOCATION_FAIL_CLOSED` (`true` or `false`, default `false`) decides whether authentication is refused (`true`) or allowed with a logged warning (`false`) when Redis cannot answer the deny-list lookup, and `REVOCATION_SWEEP_MS` (default `60000`, 1000–3600000) is how often open sockets are re-checked. See [Device revocation](backend.md#device-revocation).
+
 Resumable sessions (clients sending the `resume` capability) are held in process memory for `RESUME_WINDOW_MS` (default `120000`) after a disconnect, with at most `MAX_DISCONNECTED_SESSIONS_PER_OWNER` (default `3`) held per installation.
 
 For a distributable Windows installer, run `npm run build`. Do not edit `dist/`, the installer, or bundled tools in `bin/` by hand.
