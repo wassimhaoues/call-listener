@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld("callApi", {
   getWsUrl: () => ipcRenderer.invoke("auth:getWsUrl"),
   getPlatformCapabilities: () => ipcRenderer.invoke("platform:getCapabilities"),
   getModels: () => ipcRenderer.invoke("models:list"),
+  // Tells main whether an interview is capturing audio (tray status and the
+  // close-to-tray notice). Only a boolean crosses the bridge.
+  setInterviewActive: (active) => ipcRenderer.send("session:interviewActive", active === true),
   // Explicit candidate action only: resolves { ok, brief, model } or { ok: false, error }.
   generatePreparationBrief: (context) => ipcRenderer.invoke("preparation:brief", context),
   // Renderer-safe diagnostics snapshot (no host identifiers, no paths).

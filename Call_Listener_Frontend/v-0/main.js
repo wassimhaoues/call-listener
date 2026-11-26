@@ -16,6 +16,7 @@ const {
   Menu,
   nativeImage,
   net,
+  Notification,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 
@@ -56,6 +57,7 @@ const { classifyAuthFailure } = require("./services/authFailure");
 const { AudioRouteManager } = require("./services/audio");
 const { hardenSessionSecurity } = require("./services/security");
 const { makeTrayTemplate } = require("./services/tray");
+const { decideWindowClose, trayTooltip, HIDDEN_INTERVIEW_NOTICE } = require("./services/windowLifecycle");
 const { installSVVWithProgress } = require("./services/SoundVolumeInstaller");
 const { createProgressWindow } = require("./services/progressWindow");
 const { getPlatformCapabilities } = require("./services/platformCapabilities");
@@ -65,6 +67,9 @@ const { getOrCreateInstallationId } = require("./services/installationId");
 // ---- Globals (main process) --------------------------------------------------
 let mainWindow = null;
 let tray = null;
+// Reported by the renderer while an interview is capturing audio.
+let interviewActive = false;
+let hiddenInterviewNotified = false;
 let quitting = false;
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
@@ -251,11 +256,25 @@ async function createWindow(authMgr, platformAudio, capabilities) {
     },
   });
 
-  // close-to-tray behavior
+  // Close to the tray only when there is a tray to come back from; tell the
+  // candidate once per interview that capture keeps running while hidden.
   mainWindow.on("close", (e) => {
-    if (!app.isQuiting) {
-      e.preventDefault();
-      mainWindow.hide();
+    const decision = decideWindowClose({
+      isQuitting: Boolean(app.isQuiting),
+      hasTray: Boolean(tray),
+      interviewActive,
+      alreadyNotified: hiddenInterviewNotified,
+    });
+    if (decision.action !== "hide") return;
+    e.preventDefault();
+    mainWindow.hide();
+    if (decision.notify) {
+      hiddenInterviewNotified = true;
+      try {
+        if (Notification.isSupported()) new Notification(HIDDEN_INTERVIEW_NOTICE).show();
+      } catch (error) {
+        console.error("[tray] notification failed:", error);
+      }
     }
   });
 
@@ -295,6 +314,14 @@ async function createWindow(authMgr, platformAudio, capabilities) {
   // ---- Renderer-safe APIs ----------------------------------------------------
   ipcMain.handle("auth:getWsUrl", async () => authMgr.makeSignedWsUrl());
   ipcMain.handle("platform:getCapabilities", () => capabilities);
+  ipcMain.on("session:interviewActive", (_event, active) => {
+    const next = active === true;
+    if (next === interviewActive) return;
+    interviewActive = next;
+    if (!next) hiddenInterviewNotified = false;
+    tray?.setToolTip(trayTooltip(interviewActive));
+    if (tray && platformAudioRef) tray.setContextMenu(buildTrayMenu(platformAudioRef));
+  });
   // The renderer may pass the interviewer source kind chosen in Setup;
   // buildDiagnostics accepts only known enum values.
   ipcMain.handle("diagnostics:get", (_event, request) =>
@@ -378,6 +405,7 @@ function buildTrayMenu(platformAudio) {
   return Menu.buildFromTemplate(
     makeTrayTemplate({
       isActive: () => platformAudio.isRoutingActive(),
+      isInterviewActive: () => interviewActive,
       onOpen: () => mainWindow?.show(),
       onToggleRouting: async () => {
         try {
@@ -407,7 +435,7 @@ function createTray(platformAudio) {
     }
 
     tray = new Tray(img);
-    tray.setToolTip("Call Listener");
+    tray.setToolTip(trayTooltip(interviewActive));
     tray.setContextMenu(buildTrayMenu(platformAudio));
     tray.on("click", () => mainWindow?.show());
   } catch (e) {
@@ -422,6 +450,8 @@ if (!gotLock) {
   app.on("second-instance", () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
+      // A window closed to the tray is hidden; focus alone would not show it.
+      if (!mainWindow.isVisible()) mainWindow.show();
       mainWindow.focus();
     }
   });

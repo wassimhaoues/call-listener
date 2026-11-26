@@ -199,6 +199,14 @@ export default function Conversation() {
     } catch {}
   }, []);
 
+  // Tell the main process while audio is being captured, so the tray shows an
+  // interview in progress and closing to the tray says capture continues.
+  const interviewActive = state.isCapturing && !reviewing;
+  useEffect(() => {
+    window.callApi?.setInterviewActive?.(interviewActive);
+  }, [interviewActive]);
+  useEffect(() => () => window.callApi?.setInterviewActive?.(false), []);
+
   // Show Stop button in the global top bar; the review has its own controls.
   useEffect(() => {
     if (reviewing) {
