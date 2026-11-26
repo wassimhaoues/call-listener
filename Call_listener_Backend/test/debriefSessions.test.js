@@ -99,3 +99,35 @@ test("a plain end of a resumable, debrief-capable session purges immediately wit
   assert.equal(socket.raw.length, sentBefore);
   assert.deepEqual(harness.purged, [sessionId]);
 });
+
+test("an explicit end keeps the words spoken just before it, so the debrief sees the final answer", async () => {
+  const { silentPcmChunk } = await import("./helpers/fixtures.js");
+  let history = null;
+  const harness = createSessionHarness({
+    generateDebrief: async ({ sessionId }) => {
+      history = await harness.ChatHistory.get(sessionId);
+      return READY;
+    },
+  });
+  const socket = harness.connect();
+  await harness.sendContext(socket, { capabilities: ["debrief"] });
+  await socket.receive({ source: "mic", chunk: silentPcmChunk(1_920) });
+  await harness.waitUntil(() => harness.deepgram.connections.length === 1, "the mic stream");
+  const [connection] = harness.deepgram.connections;
+  // Finalized but not yet ended by UtteranceEnd, plus audio Deepgram returns on Finalize.
+  connection.emitTranscript("My final answer is that I would");
+  connection.onFinalize = "measure it first.";
+
+  await socket.receive({ end: { debrief: true } });
+
+  assert.equal(connection.finalizeCalls, 1);
+  assert.deepEqual(
+    history.map(({ role, text }) => ({ role, text })),
+    [{ role: "you", text: "My final answer is that I would measure it first." }]
+  );
+  assert.deepEqual(socket.outbound.filter((message) => message.speaker), [
+    { speaker: "you", transcript: "My final answer is that I would measure it first." },
+  ]);
+  assert.deepEqual(socket.outbound.at(-1), { debrief: READY });
+  await socket.drop();
+});

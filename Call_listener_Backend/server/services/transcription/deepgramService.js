@@ -5,6 +5,10 @@ import { EventEmitter } from "events";
 
 const log = loggers.deepgram;
 
+// How long a flushing stop waits for Deepgram's answer to `Finalize` (the
+// transcript of audio it had not finalized yet) before closing anyway.
+export const FINALIZE_WAIT_MS = 1_500;
+
 export class DeepgramService extends EventEmitter {
   constructor(label, { deepgramClient, language = "fr", log = loggers.deepgram } = {}) {
     super();
@@ -66,6 +70,7 @@ export class DeepgramService extends EventEmitter {
     });
 
     conn.on(LiveTranscriptionEvents.Transcript, (data) => {
+      if (data?.from_finalize) this.emit("finalized");
       const text = data.channel?.alternatives?.[0]?.transcript?.trim();
       if (!text) return;
       if (data.is_final) this.buffer += text + " ";
@@ -109,8 +114,41 @@ export class DeepgramService extends EventEmitter {
     }
   }
 
-  async stop() {
+  /**
+   * Ask Deepgram to finalize buffered audio, wait (bounded) for that answer,
+   * and emit whatever finalized text has no `UtteranceEnd` yet as the last
+   * utterance. Without this, the words spoken just before an explicit end
+   * (often the candidate's final answer) never reach the transcript.
+   */
+  async flush({ waitMs = FINALIZE_WAIT_MS } = {}) {
     if (!this.conn) return;
+    await new Promise((resolve) => {
+      const timer = setTimeout(done, waitMs);
+      function done() {
+        clearTimeout(timer);
+        resolve();
+      }
+      this.once("finalized", done);
+      try {
+        this.conn.finalize();
+      } catch {
+        this.log.warn(`⚠️ Finalize failed [${this.label}]`);
+        done();
+      }
+    });
+    this.removeAllListeners("finalized");
+    const text = this.buffer.trim();
+    this.buffer = "";
+    if (text) {
+      this.interimShown = false;
+      this.log.info(`💬 [${this.label}] Final utterance flushed at stop (${text.length} chars)`);
+      this.emit("utterance", { label: this.label, text });
+    }
+  }
+
+  async stop({ flush = false } = {}) {
+    if (!this.conn) return;
+    if (flush) await this.flush();
     this.log.info(`🛑 Stopping Deepgram [${this.label}] session.`);
     try {
       await this.conn.finish();

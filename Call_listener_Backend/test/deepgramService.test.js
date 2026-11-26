@@ -41,3 +41,51 @@ test("rejects unsupported transcription languages", () => {
     /language must be fr or en/
   );
 });
+
+test("a flushing stop finalizes buffered audio and emits the remaining text as the last utterance", async () => {
+  const { createFakeDeepgramClient } = await import("./helpers/fakeDeepgram.js");
+  const client = createFakeDeepgramClient();
+  const info = [];
+  const service = new DeepgramService("mic", {
+    deepgramClient: client,
+    language: "en",
+    log: { info: (message) => info.push(message), debug() {}, warn() {}, error() {} },
+  });
+  const utterances = [];
+  service.on("utterance", (utterance) => utterances.push(utterance));
+  await service.start();
+  const [connection] = client.connections;
+  // Finalized speech that has not seen UtteranceEnd yet, plus audio Deepgram
+  // still holds and returns in answer to Finalize.
+  connection.emitTranscript("I would measure the result");
+  connection.onFinalize = "and share it with the team.";
+
+  await service.stop({ flush: true });
+
+  assert.equal(connection.finalizeCalls, 1);
+  assert.equal(connection.finishCalls, 1);
+  assert.deepEqual(utterances, [{ label: "mic", text: "I would measure the result and share it with the team." }]);
+  assert.doesNotMatch(info.join("\n"), /measure the result/);
+});
+
+test("a flushing stop gives up waiting for Finalize after the bound and a plain stop never finalizes", async (t) => {
+  const { createFakeDeepgramClient } = await import("./helpers/fakeDeepgram.js");
+  const client = createFakeDeepgramClient();
+  const service = new DeepgramService("system", { deepgramClient: client, language: "en", log: { info() {}, debug() {}, warn() {}, error() {} } });
+  const utterances = [];
+  service.on("utterance", (utterance) => utterances.push(utterance));
+  await service.start();
+  const [connection] = client.connections;
+  connection.emitTranscript("Last question?");
+  connection.onFinalize = null; // Deepgram never answers
+  const started = Date.now();
+  await service.flush({ waitMs: 30 });
+  assert.ok(Date.now() - started < 1_000);
+  assert.deepEqual(utterances, [{ label: "system", text: "Last question?" }]);
+
+  const plain = new DeepgramService("mic", { deepgramClient: client, language: "en", log: { info() {}, debug() {}, warn() {}, error() {} } });
+  await plain.start();
+  await plain.stop();
+  assert.equal(client.connections[1].finalizeCalls, undefined);
+  t.diagnostic("plain stop sends no Finalize");
+});

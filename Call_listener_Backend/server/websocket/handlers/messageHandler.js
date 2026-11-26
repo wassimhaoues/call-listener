@@ -125,7 +125,8 @@ export function createMessageHandler({
       typeof generateDebrief === "function";
     if (!withDebrief) {
       log.info(`🛑 Session [${sessionId}] ended.`);
-      await streamManager.closeAll();
+      // An explicit end keeps the words spoken just before it.
+      await streamManager.closeAll({ flushFinal: true });
       await onEnd?.();
       return;
     }
@@ -133,7 +134,8 @@ export function createMessageHandler({
     const signal = beginEnd?.() ?? new AbortController().signal;
     log.info(`🛑 Session [${sessionId}] ended; preparing the debrief.`);
     try {
-      await streamManager.closeAll();
+      // An explicit end keeps the words spoken just before it.
+      await streamManager.closeAll({ flushFinal: true });
       const debrief = await generateDebrief({ sessionId, signal });
       if (debrief && !signal.aborted) sendJson(wsClient, { debrief });
     } finally {
