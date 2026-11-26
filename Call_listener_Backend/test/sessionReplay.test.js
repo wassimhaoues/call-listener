@@ -10,6 +10,7 @@ const SESSIONS = [
   "sessions/en-two-channel.json",
   "sessions/fr-behavioral.json",
   "sessions/en-budget-exhausted.json",
+  "sessions/en-streaming.json",
 ];
 
 async function replay(session, metrics) {

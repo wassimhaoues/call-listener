@@ -12,7 +12,9 @@ export function estimatedCostUsd(call, response, {
   outputUsdPerMillionTokens = 1.2,
 } = {}) {
   const inputTokens = Math.ceil((String(call.system).length + String(call.history).length) / 4);
-  const outputTokens = Math.ceil(String(response.content).trim().length / 4);
+  // Streamed fixtures carry their text as `chunks` instead of `content`.
+  const content = response.content ?? (response.chunks || []).join("");
+  const outputTokens = Math.ceil(String(content).trim().length / 4);
   return (inputTokens * inputUsdPerMillionTokens + outputTokens * outputUsdPerMillionTokens) / 1_000_000;
 }
 
