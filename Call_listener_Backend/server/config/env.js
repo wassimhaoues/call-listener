@@ -41,6 +41,9 @@ const CONFIG = {
   // deadline (see docs/plan/provider-retries.md).
   OPENROUTER_MAX_RETRIES: Number(process.env.OPENROUTER_MAX_RETRIES || 1),
   MAX_INTERVIEW_COST_USD: Number(process.env.MAX_INTERVIEW_COST_USD || 5),
+  // Charged model calls (answers, actions, intro, debrief, retries that
+  // reported usage) one interview may make, independent of their price.
+  MAX_INTERVIEW_MODEL_CALLS: Number(process.env.MAX_INTERVIEW_MODEL_CALLS || 400),
   // How long a disconnected resume-capable session is kept for `{ resume }`.
   RESUME_WINDOW_MS: Number(process.env.RESUME_WINDOW_MS || 120_000),
   AUTH_RATE_LIMIT_PER_MINUTE: Number(process.env.AUTH_RATE_LIMIT_PER_MINUTE || 20),
@@ -136,6 +139,7 @@ for (const key of [
   "PREPARATION_MAX_OUTPUT_TOKENS",
   "PREPARATION_REQUEST_TIMEOUT_MS",
   "PREPARATION_RATE_LIMIT_PER_MINUTE",
+  "MAX_INTERVIEW_MODEL_CALLS",
 ]) {
   if (!Number.isInteger(CONFIG[key]) || CONFIG[key] < 1) {
     throw new Error(`${key} must be a positive integer`);

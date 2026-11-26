@@ -185,3 +185,23 @@ test("device revocation settings default to fail-open with a one-minute sweep", 
     await assert.rejects(loadRevocationConfig({ REVOCATION_SWEEP_MS: value }), /REVOCATION_SWEEP_MS/);
   }
 });
+
+function loadMaxModelCalls(env) {
+  return execFileAsync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { CONFIG } from ${JSON.stringify(envModuleUrl)}; process.stdout.write(String(CONFIG.MAX_INTERVIEW_MODEL_CALLS));`,
+    ],
+    { cwd: os.tmpdir(), env: { ...baseEnv, ...env } }
+  );
+}
+
+test("MAX_INTERVIEW_MODEL_CALLS defaults to 400 and accepts only positive integers", async () => {
+  assert.equal((await loadMaxModelCalls({})).stdout, "400");
+  assert.equal((await loadMaxModelCalls({ MAX_INTERVIEW_MODEL_CALLS: "50" })).stdout, "50");
+  for (const value of ["-1", "1.5", "many"]) {
+    await assert.rejects(loadMaxModelCalls({ MAX_INTERVIEW_MODEL_CALLS: value }), /MAX_INTERVIEW_MODEL_CALLS/);
+  }
+});
