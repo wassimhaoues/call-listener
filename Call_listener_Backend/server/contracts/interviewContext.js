@@ -47,7 +47,26 @@ const LegacyContextSchema = z.object({
   }).default({}),
 });
 
+export const SUPPORTED_CONTEXT_VERSIONS = Object.freeze([1]);
+
+/** Thrown when a context declares a `version` this server does not implement. */
+export class UnsupportedContextVersionError extends Error {
+  constructor() {
+    super("unsupported_context_version");
+    this.name = "UnsupportedContextVersionError";
+    this.code = "unsupported_context_version";
+  }
+}
+
 export function parseInterviewContext(value) {
+  // Only legacy payloads omit `version`. Any other declared version must be
+  // rejected, never parsed as an empty legacy context.
+  if (
+    value && typeof value === "object" && !Array.isArray(value) &&
+    value.version !== undefined && !SUPPORTED_CONTEXT_VERSIONS.includes(value.version)
+  ) {
+    throw new UnsupportedContextVersionError();
+  }
   const candidateResult = CandidateInterviewContextSchema.safeParse(value);
   if (candidateResult.success) return candidateResult.data;
   if (value && typeof value === "object" && value.version === 1) {

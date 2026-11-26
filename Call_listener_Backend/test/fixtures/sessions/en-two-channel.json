@@ -164,6 +164,7 @@
       { "input_tokens": 1200, "output_tokens": 150, "total_tokens": 1350 },
       null
     ],
-    "spentUsd": 0.000672
+    "spentUsd": 0.000672,
+    "estimatedUsage": ["missingUsage"]
   }
 }

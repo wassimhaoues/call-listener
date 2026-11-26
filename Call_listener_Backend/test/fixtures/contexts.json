@@ -157,13 +157,25 @@
       "payload": "Paste of a CV instead of a structured context"
     }
   ],
-  "quirks": [
+  "unsupportedVersions": [
     {
-      "name": "unknown future version silently parses as an empty legacy context",
-      "note": "Current behavior, not a contract: version !== 1 falls back to the legacy schema, which strips unknown keys. Tracked for the P0-07 v2 contract work.",
+      "name": "unknown future version is rejected, not parsed as an empty legacy context",
+      "note": "Only legacy payloads omit `version`; any declared version other than 1 gets { error: \"unsupported_context_version\" } and nothing is stored.",
       "base": "validEn",
       "set": { "version": 2 },
-      "expect": { "kind": "legacy-empty" }
+      "expect": { "error": "unsupported_context_version" }
+    },
+    {
+      "name": "string version is rejected",
+      "base": "validEn",
+      "set": { "version": "1" },
+      "expect": { "error": "unsupported_context_version" }
+    },
+    {
+      "name": "legacy payload with a version field is rejected",
+      "base": "legacy",
+      "set": { "version": 0 },
+      "expect": { "error": "unsupported_context_version" }
     }
   ]
 }

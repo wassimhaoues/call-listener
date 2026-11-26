@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createAiReplyGenerator } from "../server/services/ai/aiService.js";
 import { createFakeChatOpenRouter } from "./helpers/fakeProvider.js";
 import { createReplayHarness } from "./helpers/replayHarness.js";
-import { loadContexts, loadProviderResponses } from "./helpers/fixtures.js";
+import { estimatedCostUsd, loadContexts, loadProviderResponses } from "./helpers/fixtures.js";
 
 const contexts = loadContexts();
 const { responses, cases } = loadProviderResponses();
@@ -29,9 +29,13 @@ for (const providerCase of cases) {
     const { provider, generateReply } = createGenerator(providerCase.response, providerCase.requestTimeoutMs);
     const controller = new AbortController();
     const usage = [];
+    const bases = [];
     const request = generateReply("system prompt", "caller: question", {
       signal: controller.signal,
-      onUsage: (value) => usage.push(value ?? null),
+      onUsage: (value, estimateBasis) => {
+        usage.push(value ?? null);
+        bases.push(estimateBasis);
+      },
     });
     if (providerCase.abortByCaller) {
       while (provider.pendingCount() === 0) await new Promise((resolve) => setImmediate(resolve));
@@ -49,6 +53,10 @@ for (const providerCase of cases) {
     } else {
       assert.equal(await request, adapter.text);
       assert.deepEqual(usage, [adapter.usage]);
+      assert.deepEqual(bases, [{
+        inputChars: "system prompt".length + "caller: question".length,
+        outputChars: adapter.text.length,
+      }], "usage is reported with char counts for a fallback estimate");
     }
     assert.equal(provider.calls.length, 1, "the adapter never retries");
   });
@@ -79,11 +87,18 @@ for (const providerCase of cases) {
     assert.deepEqual(history[0], ["caller", QUESTION], "the question is kept even when generation fails");
     assert.equal(history.length, providerCase.session.outcome === "reply" ? 2 : 1);
 
+    // `costUsd` is the reported-usage cost; a reply without usage is charged
+    // a conservative char-based estimate on top, never recorded as free.
+    const expectedCostUsd = providerCase.session.costUsd + (providerCase.session.estimatedUsage
+      ? estimatedCostUsd(harness.provider.calls[0], responses[providerCase.response])
+      : 0);
+    assert.equal(harness.estimatedUsage.length, providerCase.session.estimatedUsage ? 1 : 0);
     const { spentUsd } = await harness.Budget.canGenerate(harness.sessionId);
     assert.ok(
-      Math.abs(spentUsd - providerCase.session.costUsd) < 1e-12,
-      `spent ${spentUsd}, expected ${providerCase.session.costUsd}`
+      Math.abs(spentUsd - expectedCostUsd) < 1e-12,
+      `spent ${spentUsd}, expected ${expectedCostUsd}`
     );
+    if (providerCase.session.estimatedUsage) assert.ok(spentUsd > 0);
     await harness.streamManager.closeAll();
   });
 }

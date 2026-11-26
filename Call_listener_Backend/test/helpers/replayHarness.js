@@ -45,11 +45,14 @@ export function createReplayHarness({
     log: silentLog,
   });
   const usageCalls = [];
+  const estimatedUsage = [];
   const Budget = {
     ...realBudget,
-    recordUsage(id, usage) {
+    async recordUsage(id, usage, estimateBasis) {
       usageCalls.push(usage ?? null);
-      return realBudget.recordUsage(id, usage);
+      const result = await realBudget.recordUsage(id, usage, estimateBasis);
+      if (result.estimated) estimatedUsage.push(result);
+      return result;
     },
   };
 
@@ -185,6 +188,7 @@ export function createReplayHarness({
     ContextStore,
     Budget,
     usageCalls,
+    estimatedUsage,
     sessionId,
     sendRaw,
     send: (message) => sendRaw(JSON.stringify(message)),
