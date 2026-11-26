@@ -11,6 +11,7 @@ import { CONFIG } from "../../config/env.js";
 import { parseInterviewContext } from "../../contracts/interviewContext.js";
 import { createInterviewWorkflow } from "../../services/interview/interviewWorkflow.js";
 import { createInterviewBudget } from "../../services/ai/interviewBudget.js";
+import { createDebriefGenerator } from "../../services/interview/debrief.js";
 import { loggers } from "../../core/logger/index.js";
 import { createSessionManager } from "../../services/session/sessionManager.js";
 import { createConnectionHandler } from "./connectionLifecycle.js";
@@ -38,12 +39,22 @@ const Budget = CONFIG.AI_PROVIDER === "openrouter"
     outputUsdPerMillionTokens: CONFIG.OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS,
   })
   : null;
+// One bounded generation (plus at most one repair) per explicit end that asks
+// for it; charged to the same interview budget.
+const generateDebrief = createDebriefGenerator({
+  ChatHistory,
+  ContextStore,
+  generateReply,
+  Budget,
+  log: loggers.ai,
+});
 const handleMessage = createMessageHandler({
   ChatHistory,
   ContextStore,
   generateReply,
   buildPrompt,
   parseContext: parseInterviewContext,
+  generateDebrief,
   Budget,
   // Model selection is OpenRouter-only; the Groq rollback adapter rejects any explicit choice.
   isModelAllowed: (modelId) => CONFIG.AI_PROVIDER === "openrouter" &&

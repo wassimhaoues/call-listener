@@ -12,6 +12,7 @@ const SESSIONS = [
   "sessions/en-budget-exhausted.json",
   "sessions/en-streaming.json",
   "sessions/en-actions.json",
+  "sessions/en-debrief.json",
 ];
 
 async function replay(session, metrics) {
@@ -45,6 +46,10 @@ async function replay(session, metrics) {
     }
     for (const fragment of step.providerPromptExcludes || []) {
       assert.ok(!newCalls[0].system.includes(fragment), `${label}: prompt should exclude "${fragment}"`);
+    }
+    // The user (data) message: the history, or the debrief's JSON data.
+    for (const fragment of step.providerDataIncludes || []) {
+      assert.ok(newCalls[0].history.includes(fragment), `${label}: provider data should include ${fragment}`);
     }
     if (step.providerHistoryEndsWith) {
       assert.ok(

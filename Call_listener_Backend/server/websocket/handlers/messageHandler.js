@@ -1,8 +1,10 @@
 import { loggers } from "../../core/logger/index.js";
 import {
   parseClientCapabilities,
+  requestsDebrief,
   requestsSessionResume,
 } from "../../contracts/interviewContext.js";
+import { parseEndRequest } from "../../contracts/interviewReview.js";
 import {
   isCandidateActionFrame,
   parseCandidateAction,
@@ -83,6 +85,9 @@ export function createMessageHandler({
   parseContext = (context) => context,
   parseCapabilities = parseClientCapabilities,
   parseResumeCapability = requestsSessionResume,
+  parseDebriefCapability = requestsDebrief,
+  // Optional end-of-interview debrief (see services/interview/debrief.js).
+  generateDebrief,
   Budget,
   isModelAllowed = () => false,
   log = loggers.websocket,
@@ -94,6 +99,48 @@ export function createMessageHandler({
     throw new TypeError("generateReply and buildPrompt are required");
   }
 
+  // Per-session state, keyed by the session's stream manager: sessions whose
+  // latest context advertised `debrief`, and sessions already ending with one.
+  const debriefClients = new WeakSet();
+  const endingWithDebrief = new WeakSet();
+
+  /**
+   * `{ end: true }` stops capture and model work exactly as before. A
+   * debrief-capable client may send `{ end: { debrief: true } }`: the same
+   * stop, then one bounded debrief generation, then the usual purge. The
+   * result is sent before the purge; nothing is sent once the socket closed
+   * (`beginEnd` returns a signal the session aborts on close).
+   */
+  async function endSession({ wsClient, sessionId, end, streamManager, onEnd, beginEnd }) {
+    const request = parseEndRequest(end);
+    if (!request) {
+      log.warn(`⚠️ Invalid end request from [${sessionId}]`);
+      sendJson(wsClient, { error: "Invalid message" });
+      return;
+    }
+    // The session is already ending with a debrief; it purges when that finishes.
+    if (endingWithDebrief.has(streamManager)) return;
+    const withDebrief = request.debrief &&
+      debriefClients.has(streamManager) &&
+      typeof generateDebrief === "function";
+    if (!withDebrief) {
+      log.info(`🛑 Session [${sessionId}] ended.`);
+      await streamManager.closeAll();
+      await onEnd?.();
+      return;
+    }
+    endingWithDebrief.add(streamManager);
+    const signal = beginEnd?.() ?? new AbortController().signal;
+    log.info(`🛑 Session [${sessionId}] ended; preparing the debrief.`);
+    try {
+      await streamManager.closeAll();
+      const debrief = await generateDebrief({ sessionId, signal });
+      if (debrief && !signal.aborted) sendJson(wsClient, { debrief });
+    } finally {
+      await onEnd?.();
+    }
+  }
+
   return async function handleMessage({
     wsClient,
     sessionId,
@@ -103,6 +150,7 @@ export function createMessageHandler({
     // tests that drive the handler directly may omit them.
     onContextAccepted,
     onEnd,
+    beginEnd,
   }) {
     try {
       const msg = JSON.parse(data.toString());
@@ -142,6 +190,8 @@ export function createMessageHandler({
         // Capabilities follow the latest accepted context, so a client that
         // resends context without `stream` is downgraded for later generations.
         streamManager.setClientCapabilities?.(capabilities);
+        if (parseDebriefCapability(msg.context)) debriefClients.add(streamManager);
+        else debriefClients.delete(streamManager);
         // Session-level opt-ins (resume) are applied before any reply so the
         // introductory suggestion is already sequenced.
         onContextAccepted?.({ resume });
@@ -187,9 +237,7 @@ export function createMessageHandler({
       }
 
       if (msg.end) {
-        log.info(`🛑 Session [${sessionId}] ended.`);
-        await streamManager.closeAll();
-        await onEnd?.();
+        await endSession({ wsClient, sessionId, end: msg.end, streamManager, onEnd, beginEnd });
         return;
       }
 
