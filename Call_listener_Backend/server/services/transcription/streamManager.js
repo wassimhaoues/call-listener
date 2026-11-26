@@ -1,6 +1,10 @@
 import { loggers } from "../../core/logger/index.js";
 import { isInterviewerQuestion } from "../interview/questionClassifier.js";
 import { ACTION_REJECTION } from "../../contracts/candidateAction.js";
+import { createInterimThrottle, INTERIM_MIN_INTERVAL_MS } from "./interimTranscripts.js";
+import { createUtteranceDeduplicator, UTTERANCE_DEDUP_WINDOW_MS } from "./utteranceDeduplicator.js";
+
+const SPEAKER_BY_LABEL = Object.freeze({ mic: "you", system: "caller" });
 
 // Response actions rewrite the latest answer; clarify produces questions for
 // the interviewer instead, so it never becomes the answer later actions use.
@@ -41,6 +45,8 @@ export class StreamManager {
     runInterviewWorkflow,
     Budget,
     log = loggers.deepgram,
+    interimIntervalMs = INTERIM_MIN_INTERVAL_MS,
+    dedupWindowMs = UTTERANCE_DEDUP_WINDOW_MS,
   } = {}) {
     if (typeof createTranscriptionStream !== "function") {
       throw new TypeError("createTranscriptionStream is required");
@@ -108,12 +114,59 @@ export class StreamManager {
     this.generationIdsRequested = false;
     this.STREAM_FLUSH_MS = 50;
     this.generationSequence = 0;
+    // `interim` capability: throttled, display-only in-progress transcript
+    // lines. They are never stored, classified, or replayed.
+    this.interimEnabled = false;
+    this.interimThrottle = createInterimThrottle({
+      intervalMs: interimIntervalMs,
+      send: (label, text) => this.sendInterim(label, text),
+    });
+    // Near-exact repeats of a source's previous final utterance are dropped
+    // before they are stored, shown, or classified.
+    this.utteranceDedup = createUtteranceDeduplicator({
+      windowMs: dedupWindowMs,
+      now: () => this.now(),
+    });
   }
 
   /** Apply the capabilities advertised by the latest accepted context. */
-  setClientCapabilities({ stream = false, actions = false } = {}) {
+  setClientCapabilities({ stream = false, actions = false, interim = false } = {}) {
     this.streamingEnabled = stream === true;
     this.generationIdsRequested = actions === true;
+    this.interimEnabled = interim === true;
+    if (!this.interimEnabled) this.interimThrottle.cancelAll();
+  }
+
+  sendInterim(label, text) {
+    if (this.closed || !this.interimEnabled) return;
+    this.sendToClient({ interim: { speaker: SPEAKER_BY_LABEL[label], text } }, "interim");
+  }
+
+  /** An interim event from a transcription stream; empty text ends the line. */
+  handleInterim(label, text) {
+    // Paused or stopped streams are detached; nothing outlives them.
+    if (this.closed || !this.interimEnabled || !this.streams[label]) return;
+    if (text) {
+      this.interimThrottle.push(label, text);
+      return;
+    }
+    if (this.interimThrottle.settle(label)) this.sendInterim(label, "");
+  }
+
+  /**
+   * A completed utterance from a transcription stream. Its interim line ends
+   * here; a near-exact repeat of the previous final is dropped (and its
+   * interim line cleared) so it is never stored, shown, or classified twice.
+   */
+  async handleTranscribedUtterance(label, text, eventGeneration) {
+    const interimShown = this.interimThrottle.settle(label);
+    if (this.utteranceDedup.isDuplicate(label, text)) {
+      // Metadata only: never the transcript text.
+      this.log.debug(`Duplicate [${label}] utterance suppressed (${text.length} chars) [${this.sessionId}]`);
+      if (interimShown) this.sendInterim(label, "");
+      return false;
+    }
+    return this.handleUtterance(label, text, eventGeneration);
   }
 
   sendToClient(payload, label = "message") {
@@ -187,7 +240,10 @@ export class StreamManager {
 
       stream.on("utterance", async ({ label: eventLabel, text }) => {
         const eventGeneration = this.generation;
-        await this.handleUtterance(eventLabel, text, eventGeneration);
+        await this.handleTranscribedUtterance(eventLabel, text, eventGeneration);
+      });
+      stream.on("interim", ({ label: eventLabel, text }) => {
+        this.handleInterim(eventLabel, text);
       });
 
       this.listenersAttached[label] = true;
@@ -483,10 +539,13 @@ export class StreamManager {
     const streams = Object.entries(this.streams);
     this.streams = {};
     this.listenersAttached = {};
+    // No interim line outlives its stream: pending text and timers are dropped.
+    this.interimThrottle.cancelAll();
     await Promise.allSettled(
       streams.map(async ([label, stream]) => {
         try {
           stream.removeAllListeners?.("utterance");
+          stream.removeAllListeners?.("interim");
           await stream.stop();
           this.log.debug(`🔻 Closed [${label}] stream`);
         } catch (error) {

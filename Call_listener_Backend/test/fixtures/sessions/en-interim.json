@@ -1,0 +1,152 @@
+{
+  "id": "en-interim-v1",
+  "description": "Synthetic English interview from a client advertising the `interim` capability. Covers interim frames for in-progress speech on both channels, unchanged interim text not being resent, the final transcript replacing the interim line, an exact and a repeated-tail duplicate final that are suppressed (no history, no transcript, no classifier or generation run), an interim line abandoned without a final, and no interim frames after end.",
+  "harness": {},
+  "steps": [
+    {
+      "label": "context advertising interim, with intro suggestion",
+      "type": "context",
+      "context": "validEn",
+      "capabilities": ["interim"],
+      "provider": "introSuccess",
+      "expect": [{ "ai_reply": "Open with your billing migration: scope, risk, and the zero-data-loss result.", "model": { "selected": "fixture/model", "actual": null } }]
+    },
+    { "label": "interviewer audio starts", "type": "audio", "source": "system", "bytes": 1920, "count": 2, "expect": [] },
+    { "label": "candidate audio starts", "type": "audio", "source": "mic", "bytes": 1920, "count": 1, "expect": [] },
+    {
+      "label": "first interviewer interim",
+      "type": "transcript",
+      "source": "system",
+      "text": "Tell me",
+      "isFinal": false,
+      "expect": [{ "interim": { "speaker": "caller", "text": "Tell me" } }]
+    },
+    {
+      "label": "growing interviewer interim",
+      "type": "transcript",
+      "source": "system",
+      "text": "Tell me about a time",
+      "isFinal": false,
+      "expect": [{ "interim": { "speaker": "caller", "text": "Tell me about a time" } }]
+    },
+    { "label": "unchanged interim is not resent", "type": "transcript", "source": "system", "text": "Tell me about a time", "isFinal": false, "expect": [] },
+    { "label": "final segment matching the shown interim is not resent", "type": "transcript", "source": "system", "text": "Tell me about a time", "isFinal": true, "expect": [] },
+    {
+      "label": "candidate interim overlaps the interviewer",
+      "type": "transcript",
+      "source": "mic",
+      "text": "Mm",
+      "isFinal": false,
+      "expect": [{ "interim": { "speaker": "you", "text": "Mm" } }]
+    },
+    {
+      "label": "second final segment extends the interviewer interim",
+      "type": "transcript",
+      "source": "system",
+      "text": "you led a migration.",
+      "isFinal": true,
+      "expect": [{ "interim": { "speaker": "caller", "text": "Tell me about a time you led a migration." } }]
+    },
+    {
+      "label": "utterance end: the final transcript replaces the interim and generates guidance",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "migrationAnswer",
+      "providerHistoryEndsWith": "caller: Tell me about a time you led a migration.",
+      "expect": [
+        { "speaker": "caller", "transcript": "Tell me about a time you led a migration." },
+        { "generation": { "state": "thinking" } },
+        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss.", "model": { "selected": "fixture/model", "actual": null } }
+      ]
+    },
+    {
+      "label": "Deepgram repeats the whole final",
+      "type": "transcript",
+      "source": "system",
+      "text": "Tell me about a time you led a migration.",
+      "isFinal": true,
+      "expect": [{ "interim": { "speaker": "caller", "text": "Tell me about a time you led a migration." } }]
+    },
+    {
+      "label": "the duplicate utterance is suppressed and its interim line cleared",
+      "type": "utteranceEnd",
+      "source": "system",
+      "expect": [{ "interim": { "speaker": "caller", "text": "" } }]
+    },
+    {
+      "label": "Deepgram re-finalizes the question's tail",
+      "type": "transcript",
+      "source": "system",
+      "text": "You led a migration",
+      "isFinal": true,
+      "expect": [{ "interim": { "speaker": "caller", "text": "You led a migration" } }]
+    },
+    {
+      "label": "the repeated tail is suppressed too",
+      "type": "utteranceEnd",
+      "source": "system",
+      "expect": [{ "interim": { "speaker": "caller", "text": "" } }]
+    },
+    {
+      "label": "candidate answer final",
+      "type": "transcript",
+      "source": "mic",
+      "text": "I led the move of our billing service.",
+      "isFinal": true,
+      "expect": [{ "interim": { "speaker": "you", "text": "I led the move of our billing service." } }]
+    },
+    {
+      "label": "candidate utterance end",
+      "type": "utteranceEnd",
+      "source": "mic",
+      "expect": [{ "speaker": "you", "transcript": "I led the move of our billing service." }]
+    },
+    {
+      "label": "candidate starts speaking again",
+      "type": "transcript",
+      "source": "mic",
+      "text": "So",
+      "isFinal": false,
+      "expect": [{ "interim": { "speaker": "you", "text": "So" } }]
+    },
+    {
+      "label": "speech without a final segment ends its interim line",
+      "type": "utteranceEnd",
+      "source": "mic",
+      "expect": [{ "interim": { "speaker": "you", "text": "" } }]
+    },
+    {
+      "label": "interviewer interim before end",
+      "type": "transcript",
+      "source": "system",
+      "text": "One more",
+      "isFinal": false,
+      "expect": [{ "interim": { "speaker": "caller", "text": "One more" } }]
+    },
+    { "label": "end", "type": "end", "expect": [] },
+    { "label": "late interim after end", "type": "transcript", "source": "system", "text": "One more thing", "isFinal": false, "expect": [] },
+    { "label": "late final after end", "type": "transcript", "source": "system", "text": "One more thing.", "isFinal": true, "expect": [] },
+    { "label": "late utterance end after end", "type": "utteranceEnd", "source": "system", "expect": [] }
+  ],
+  "final": {
+    "streams": [
+      { "label": "system", "language": "en", "chunks": 2, "finishCalls": 1 },
+      { "label": "mic", "language": "en", "chunks": 1, "finishCalls": 1 }
+    ],
+    "storedTranscriptionLanguage": "en",
+    "history": [
+      ["caller", "Tell me about a time you led a migration."],
+      ["assistant", "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss."],
+      ["you", "I led the move of our billing service."]
+    ],
+    "providerCalls": [
+      { "name": "introSuccess", "status": "resolved" },
+      { "name": "migrationAnswer", "status": "resolved" }
+    ],
+    "usage": [
+      { "input_tokens": 900, "output_tokens": 60, "total_tokens": 960 },
+      { "input_tokens": 1200, "output_tokens": 150, "total_tokens": 1350 }
+    ],
+    "spentUsd": 0.000672
+  }
+}
