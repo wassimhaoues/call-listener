@@ -37,6 +37,9 @@ export function createReplayHarness({
   // and deterministic; time-based batching is covered by unit tests.
   streamFlushMs = 60_000,
   actionMinIntervalMs = 0,
+  // Interim frames are sent on every update so replays stay timer-free;
+  // the 200 ms throttle has unit tests.
+  interimIntervalMs = 0,
   sessionId = "replay-session",
 } = {}) {
   const redis = createMemoryRedis();
@@ -88,6 +91,7 @@ export function createReplayHarness({
     runInterviewWorkflow: async (input) => (await workflow.invoke(input)).suggestion,
     Budget,
     log: silentLog,
+    interimIntervalMs,
   });
   // The production 800 ms cooldown only delays the next generation; replays
   // assert ordering, so it is disabled to keep them fast and timer-free.

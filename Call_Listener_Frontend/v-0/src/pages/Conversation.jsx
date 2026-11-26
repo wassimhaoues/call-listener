@@ -297,7 +297,7 @@ export default function Conversation() {
         <Card className="min-h-0 flex flex-col">
           <CardHeader>Conversation</CardHeader>
           <CardBody className="flex-1 min-h-0 p-0">
-            <TranscriptLog entries={state.transcript} />
+            <TranscriptLog entries={state.transcript} interim={state.interim} />
           </CardBody>
         </Card>
 
