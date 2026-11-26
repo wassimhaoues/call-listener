@@ -11,6 +11,7 @@ import {
 } from "../src/services/conversationState.js";
 import {
   nextReconnectDelay,
+  randomFraction,
   reconnectDelay,
   RECONNECT_WINDOW_MS,
 } from "../src/services/reconnectPolicy.js";
@@ -74,6 +75,17 @@ describe("reconnect policy", () => {
     expect([0, 1, 4].map((attempt) => reconnectDelay(attempt, () => 0))).toEqual([250, 500, 4000]);
     const jittered = reconnectDelay(2, () => 0.5);
     expect(jittered).toBe(1500);
+  });
+
+  it("draws default jitter from Web Crypto within the documented range", () => {
+    for (let index = 0; index < 50; index += 1) {
+      const fraction = randomFraction();
+      expect(fraction).toBeGreaterThanOrEqual(0);
+      expect(fraction).toBeLessThan(1);
+      const delay = reconnectDelay(3);
+      expect(delay).toBeGreaterThanOrEqual(2000);
+      expect(delay).toBeLessThanOrEqual(4000);
+    }
   });
 
   it("stops scheduling once the next attempt would leave the window", () => {

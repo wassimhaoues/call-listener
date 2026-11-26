@@ -15,7 +15,7 @@ import {
   encodeInterviewerQuestionMessage,
   encodeResumeMessage,
 } from "@/services/interviewMessages.js";
-import { nextReconnectDelay } from "@/services/reconnectPolicy.js";
+import { nextReconnectDelay, randomFraction } from "@/services/reconnectPolicy.js";
 
 const WEBSOCKET_OPEN = 1;
 const RESUME_FAILURES = new Set(["resume_expired", "resume_rejected"]);
@@ -56,7 +56,7 @@ export function useInterviewSocket({
   isPaused = () => false,
   getContext = () => undefined,
   getWsUrl = defaultGetWsUrl,
-  random = Math.random,
+  random = randomFraction,
   now = Date.now,
 }) {
   const wsRef = useRef(null);
