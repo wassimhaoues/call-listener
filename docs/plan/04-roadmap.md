@@ -9,7 +9,7 @@ Dependencies: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8**. Phase 3 scr
 Outcome: the current system can be rebuilt, exercised, and compared against later versions.
 
 - [ ] Inventory source, configuration names, package locks, existing binaries, audio assets, and release identifiers without copying credentials.
-- [ ] Establish a recoverable source snapshot/version-control baseline; preserve all existing files. Record installer provenance separately from the source build.
+- [x] Establish a recoverable source snapshot/version-control baseline; preserve all existing files. Record installer provenance separately from the source build. Git repository published to GitHub (2026-11-25); third-party Windows binaries are fetched in CI from upstream with recorded hashes rather than committed.
 - [x] Verify the current Node/package compatibility and run an isolated LangChain/LangGraph/OpenRouter construction test; exact backend package versions are locked. Windows build prerequisites still need a supported Windows machine.
 - [ ] Record Ubuntu 24.04/PipeWire as the Linux target and run the Linux baseline from [Linux desktop support](08-linux-support.md).
 - [x] Replace placeholder checks with a backend test harness and renderer tests using Vitest/React Testing Library. Extend them with mocked provider adapters, fake WebSocket clients, and disposable Redis coverage.

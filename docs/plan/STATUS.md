@@ -1,15 +1,15 @@
 # Implementation Status
 
-Last updated: 2026-11-25.
+Last updated: 2026-11-26.
 
 | Phase | Status | Evidence |
 | --- | --- | --- |
-| 0 — Baseline | In progress | Portable backend and frontend test commands are implemented. AI-framework compatibility and Linux baseline checks are underway. Synthetic, provider-free backend fixtures and deterministic session replays are in place ([fixtures](fixtures.md)). Windows/Linux install, recorded-audio fixtures, and real-device measurement gates remain. |
-| 1 — Foundations | In progress | Safe rendering, session expiry, stream lifecycle, and provider-request cancellation are implemented and tested; access and Windows-restoration gates remain. |
-| 2 — OpenRouter | In progress | OpenRouter is locally configured with the selected model, cancellation, a 10-second request deadline, a 600-token output cap, and reported-usage accounting against the $5 session ceiling; one controlled live preflight passed, while streaming, model policy, retries, and multi-model validation remain. |
+| 0 — Baseline | In progress | Portable backend and frontend test commands are implemented. AI-framework compatibility and Linux baseline checks are underway. Synthetic, provider-free backend fixtures and deterministic session replays are in place ([fixtures](fixtures.md)). The source is versioned in a public GitHub repository, and GitHub Actions now builds, installs, launches, and uninstalls the Windows NSIS package and exercises VB-Cable audio restoration on a Windows runner; Linux deb/AppImage packaging runs in CI. Recorded-audio fixtures and real-device measurement gates remain. |
+| 1 — Foundations | In progress | Safe rendering, session expiry, stream lifecycle, and provider-request cancellation are implemented and tested. Intro generation is now aborted on end/close and superseded by a newer context, the live page releases late sockets/tracks and sends the final audio batch on Stop, and Windows crash restoration (detached watchdog) is verified on a CI runner with VB-Cable. Access/enrollment and physical-device restoration gates remain. |
+| 2 — OpenRouter | In progress | OpenRouter is locally configured with the selected model, cancellation, a 10-second request deadline, a 600-token output cap, and reported-usage accounting against the $5 session ceiling; one controlled live preflight passed. An allowlisted model catalog (`GET /models`), a session-scoped model picker with server-side rejection (`unsupported_model`), selected/actual model IDs on replies, and conservative estimated accounting when usage metadata is missing are implemented. Streaming, retries, per-model pricing, and multi-model validation remain. |
 | 3 — Candidate preparation | In progress | Local CV/job-description extraction, editable requirements, evidence references, a reviewable preparation brief, confirmed legacy migration, and explicit French/English answer/transcription languages are implemented; model-backed preparation remains. |
-| 4 — LangGraph workflow | In progress | The bounded graph receives only classified interviewer questions, selects up to three relevant approved evidence references, and uses a latest-question-wins scheduler; streaming and evaluation gates remain. |
-| 5 — Live candidate workspace | In progress | The live screen separates the current interviewer question, safe candidate guidance, and approved relevant experience from the transcript; pause/resume, thinking/listening states, and a typed-question fallback for microphone-only mode are implemented, while reconnect and remaining controls remain. |
+| 4 — LangGraph workflow | In progress | The bounded graph receives only classified interviewer questions, selects up to three relevant approved evidence references, and uses a latest-question-wins scheduler. Evidence is always bounded to three references, including the no-match fallback. Streaming and evaluation gates remain. |
+| 5 — Live candidate workspace | In progress | The live screen separates the current interviewer question, safe candidate guidance, and approved relevant experience from the transcript; pause/resume, thinking/listening states, and a typed-question fallback for microphone-only mode are implemented. Capture, socket, and generation state are extracted into tested hooks/reducer; status is derived deterministically; capture-permission errors, unsupported models, budget exhaustion, and the model used are shown; the transcript is capped at 500 entries. Reconnect and remaining response controls remain. |
 | 6 — Audio/performance | In progress | The AudioWorklet batches linear16 PCM into 20 ms chunks with a stop-time flush, and the client bounds queued WebSocket audio at 512 KiB; real-device latency, interval reporting, and reconnect gates remain. |
 | 7–8 | Not started | See [roadmap](04-roadmap.md) for dependencies and exit gates. |
 
@@ -59,12 +59,28 @@ Last updated: 2026-11-25.
 - Added synthetic backend fixtures and a deterministic replay harness ([fixtures](fixtures.md)). Three scripted sessions (English two-channel, French, budget-exhausted) run through the real message handler, stream manager, Deepgram service, LangGraph workflow, OpenRouter adapter, stores, and budget, with only Deepgram, the provider client, Redis, and the WebSocket client faked. The tests assert the exact outbound message sequence, role mapping, acknowledgement skipping, latest-question-wins aborts, no output after end, usage/missing-usage accounting, and transcription surviving provider failures. Fixture tables also cover contexts, malformed frames, WebSocket authentication failures, and provider outcomes (success, empty, 429, timeout, abort, missing usage). Step durations are recorded only as diagnostics. These fixtures contain no recorded audio and no real-device or real-provider data.
 - The replay work fixed three small backend bugs, each with a regression test. Evidence selection now matches a term that ends a sentence ("migration."). A context rejected for a mid-capture language change no longer replaces the stored context. The stream manager's default workflow now forwards provider usage to the budget. One known gap is recorded as a `todo` test: an intro suggestion can still be sent after `end`.
 
+## Continuous integration (added 2026-11-25/26)
+
+The repository is published at `github.com/wassimhaoues/call-listener` (public). Secrets, logs, build output, and third-party Windows binaries are excluded; CI downloads SoundVolumeView and VB-Cable from upstream (VB-Cable pinned by SHA-256; SoundVolumeView checked against a reviewed-hash list, strict for releases). Every pull request runs:
+
+| Job | Runner | Evidence |
+| --- | --- | --- |
+| Tests | Ubuntu + Windows | Backend and frontend suites and renderer build. The Windows job found and fixed a Vitest glob that matched no test files on Windows. |
+| Windows installer | windows-latest | Unsigned NSIS installer builds. |
+| Install smoke | windows-latest (Windows 11 build 26100) | Silent install, packaged-file checks, 25 s launch with screenshot (reaches the authentication screen; production backend not deployed), silent uninstall and cleanup. |
+| Audio restoration | windows-latest + silently installed VB-Cable | Graceful exit disables "listen to this device" and clears state; after a hard kill the detached watchdog restored it in about 3 s; `recoverIfDirty` clears leftover state. This found that the packaged app started the watchdog without `ELECTRON_RUN_AS_NODE`, launching a second app instance instead; fixed. |
+| Linux packages | ubuntu-24.04 + Xvfb (X11) | deb + AppImage build, deb install/launch/remove, AppImage launch, desktop-entry validation. The first run exposed that startup waits on authentication with no timeout and shows a blank window meanwhile (fix in progress). |
+
+Runner limits: VB-Cable is the only playback device (default-device restoration is trivially equal), there is no physical audio or call application, no real-device latency/CPU data, and no Wayland/PipeWire session.
+
 ## Latest verification
 
 Run on 2026-09-29 with Node `v24.11.1` and npm `11.10.0`:
 
 | Command | Result |
 | --- | --- |
+| `cd Call_listener_Backend && npm test` (2026-11-26, CI Node 22 and local Node `v24.11.1`) | Passed: 118 tests, 0 todo (intro lifecycle, estimated usage, context-version rejection, bounded evidence, model catalog). |
+| `cd Call_Listener_Frontend/v-0 && npm test` (2026-11-26) | Passed: 118 tests (conversation reducer/hooks, stop/flush/leak guards, capture errors, model display, auth-failure classification, model picker). |
 | `cd Call_listener_Backend && npm test` (2026-11-25, Node `v24.11.1`) | Passed: 92 tests (91 pass, 1 documented `todo`), adding synthetic session replays and context, malformed-message, auth, and provider fixture tables. |
 | `cd Call_listener_Backend && npm test` (2026-09-29) | Passed: 53 tests, including candidate/job validation, LangGraph workflow/evidence selection, question classification/latest-question scheduling, typed-question fallback, provider deadlines and terminal generation failures, secure-production/local-development cookie policy, session-cost accounting, HTTP/WebSocket authentication, message limits, stream lifecycle, explicit transcription language, transcript-log privacy, Docker secret-boundary, and readiness. |
 | `cd Call_listener_Backend && npm audit` | Passed: 0 vulnerabilities. |
@@ -80,10 +96,10 @@ Run on 2026-09-29 with Node `v24.11.1` and npm `11.10.0`:
 
 ## Remaining Phase 0 gates
 
-- Run and record clean backend/frontend build and Windows desktop install/audio restoration results on a supported Windows system.
+- Run and record Windows desktop install/audio restoration results on a physical Windows system with real playback devices. Clean build, install/uninstall, and VB-Cable restoration now pass on GitHub-hosted Windows runners (see Continuous integration).
 - Add recorded synthetic-audio fixtures and measurable baseline latency, CPU, memory, message-rate, and usage data from a named Windows test machine. Synthetic WebSocket/provider/transcript fixtures and replays now exist ([fixtures](fixtures.md)); they are not measurements.
-- Add the model allowlist, provider deadlines/retries/usage controls, and controlled non-production provider checks before exposing a model picker or shipping the live provider.
-- Establish the requested recoverable source snapshot/version-control baseline outside this checkout, which has no `.git` metadata.
+- Add provider retries (after idempotency design) and controlled non-production checks of at least two allowlisted models. The model allowlist, deadlines, and usage controls are implemented.
+- ~~Establish a recoverable source snapshot/version-control baseline.~~ Done: Git repository with remote on GitHub (2026-11-25).
 
 ## Live provider configuration
 

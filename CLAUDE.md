@@ -2,9 +2,9 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-Call Listener is a candidate-facing job-interview assistant: an Electron desktop client captures microphone and system audio, the backend transcribes it (Deepgram) and streams concise AI answer guidance back over WebSocket. See `AGENTS.md` for style/commit rules and `docs/` for detailed docs (`docs/plan/STATUS.md` is the most current record of what is implemented; `docs/architecture.md` and `docs/backend.md` predate the OpenRouter/LangGraph work and still describe Groq-only, hostname device IDs).
+Call Listener is a candidate-facing job-interview assistant: an Electron desktop client captures microphone and system audio, the backend transcribes it (Deepgram) and streams concise AI answer guidance back over WebSocket. See `AGENTS.md` for style/commit rules and `docs/` for detailed docs (`docs/plan/STATUS.md` is the most current record of what is implemented).
 
-No git metadata in this checkout. Two independent npm projects; run commands from each project dir.
+Public GitHub repo `wassimhaoues/call-listener` (default branch `main`; work on branches + PRs). Secrets, logs, `dist/`, `v-0/bin/` and the third-party `.zip` tools are git-ignored — never commit them. Two independent npm projects; run commands from each project dir.
 
 ## Commands
 
@@ -19,6 +19,9 @@ Frontend (`Call_Listener_Frontend/v-0/`, Node >=22.12):
 - `npm run dev` — Vite on 127.0.0.1:5173 + Electron (waits on `/__ping`). The Vite dev server rejects requests lacking the `x-electron-key` header, so the renderer is only reachable through Electron, not a browser.
 - `npm test` — Vitest (jsdom, setup in `test/setup.js`, tests in `test/`). Single test: `npx vitest run test/Setup.test.jsx` or `-t "name"`.
 - `npm run build` — Vite build into `dist/` then electron-builder (Windows NSIS; Linux AppImage/deb). `dist/` and `bin/` are generated/bundled — don't edit.
+
+## CI (`.github/workflows/ci.yml`)
+Every PR runs: backend+frontend tests on Ubuntu and Windows; Windows NSIS build → silent install/launch/uninstall smoke (`v-0/scripts/ci/smoke-installer.ps1`); real VB-Cable audio restoration scenarios (`v-0/scripts/ci/install-vbcable.ps1` + `audioRestore.cjs`, run with Electron in node mode); Linux deb/AppImage build + Xvfb launch (`smoke-linux.sh`). `fetch-windows-deps.ps1` downloads SoundVolumeView/VB-Cable (hash-checked; `-Strict` for releases). Use this instead of a local Windows machine; download job artifacts (screenshots, logs) with `gh run download`.
 
 ## Architecture
 
