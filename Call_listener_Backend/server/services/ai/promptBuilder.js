@@ -1,5 +1,6 @@
 import { isCandidateInterviewContext, parseInterviewContext } from "../../contracts/interviewContext.js";
 import { loggers } from "../../core/logger/index.js";
+import { fallbackEvidence, MAX_PROMPT_EVIDENCE } from "../interview/evidenceSelector.js";
 
 const log = loggers.ai;
 
@@ -32,7 +33,11 @@ function buildCandidatePrompt(context, mode, selectedEvidence) {
   const requirements = jobOffer.requirements?.length
     ? jobOffer.requirements.map((item) => `- ${item}`).join("\n")
     : "- N/A";
-  const evidenceItems = selectedEvidence?.length ? selectedEvidence : context.evidence;
+  // Never more than three references, even for the intro or a caller that
+  // passes no selection.
+  const evidenceItems = selectedEvidence?.length
+    ? selectedEvidence.slice(0, MAX_PROMPT_EVIDENCE)
+    : fallbackEvidence(context.evidence);
   const evidence = evidenceItems?.length
     ? evidenceItems.map((item) => `- Requirement: ${item.requirement}\n  Candidate evidence: ${item.evidence}`).join("\n")
     : "- N/A";
