@@ -28,6 +28,7 @@ export function createConfiguredPreparationBrief({ config, redisClient, log, Cha
     inputUsdPerMillionTokens: config.OPENROUTER_INPUT_USD_PER_MILLION_TOKENS,
     outputUsdPerMillionTokens: config.OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS,
     maxRequestsPerMinute: config.PREPARATION_RATE_LIMIT_PER_MINUTE,
+    maxOutputTokens: config.PREPARATION_MAX_OUTPUT_TOKENS,
     log,
   });
   return createPreparationBriefService({
