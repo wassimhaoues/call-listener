@@ -64,3 +64,56 @@ it("uses localhost HTTP and WS ports when explicitly configured for development"
 
   await expect(auth.makeSignedWsUrl()).resolves.toBe("ws://127.0.0.1:4000/ws");
 });
+
+it("fetches the model catalog with the main-process cookie and returns only catalog fields", async () => {
+  let requestOptions;
+  const requestClient = {
+    request(options, onResponse) {
+      requestOptions = options;
+      const handlers = {};
+      const res = {
+        statusCode: 200,
+        on: (event, handler) => { handlers[event] = handler; },
+      };
+      return {
+        on() {},
+        end() {
+          onResponse(res);
+          handlers.data(JSON.stringify({
+            provider: "openrouter",
+            defaultModel: "openai/gpt-5.6-luna",
+            models: [
+              { id: "openai/gpt-5.6-luna", name: "Luna", availability: "available", pricing: { x: 1 } },
+              { id: "removed/model", availability: "bogus" },
+              { name: "no id" },
+            ],
+          }));
+          handlers.end();
+        },
+      };
+    },
+  };
+  const auth = new AuthManager({
+    requestClient,
+    appId: "com.coworky.calllistener",
+    backendHost: "call.example.test",
+    electronSession: { cookies: { set: async () => {} } },
+    deviceId: "44d8a725-37db-4cc2-82ed-6d9e23c0db98",
+  });
+  auth.token = "main-process-only-token";
+
+  await expect(auth.fetchModels()).resolves.toEqual({
+    provider: "openrouter",
+    defaultModel: "openai/gpt-5.6-luna",
+    models: [
+      { id: "openai/gpt-5.6-luna", name: "Luna", availability: "available", isDefault: true },
+      { id: "removed/model", name: "removed/model", availability: "unknown", isDefault: false },
+    ],
+  });
+  expect(requestOptions).toMatchObject({
+    hostname: "call.example.test",
+    path: "/models",
+    method: "GET",
+    headers: { Cookie: "call_token=main-process-only-token" },
+  });
+});

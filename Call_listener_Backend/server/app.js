@@ -8,7 +8,7 @@ import cookieParser from "cookie-parser";
  * Keeping dependencies at this boundary makes the API testable without opening
  * a Redis connection or loading deployment credentials.
  */
-export function createApp({ redisClient, config } = {}) {
+export function createApp({ redisClient, config, modelCatalog } = {}) {
   if (!redisClient) throw new TypeError("redisClient is required");
   if (!config) throw new TypeError("config is required");
 
@@ -64,17 +64,34 @@ export function createApp({ redisClient, config } = {}) {
       return res.status(500).json({ error: "token_issue_failed" });
     }
   });
-  app.get("/auth/me", (req, res) => {
+  function verifyCookie(req) {
     const token = req.cookies?.call_token;
-    if (!token) return res.status(401).json({ error: "no_cookie" });
+    if (!token) return { error: "no_cookie" };
     try {
-      const claims = jwt.verify(token, config.JWT_SECRET, {
-        issuer: "call-backend",
-        audience: "call-electron",
-      });
-      return res.json({ ok: true, claims });
+      return {
+        claims: jwt.verify(token, config.JWT_SECRET, {
+          issuer: "call-backend",
+          audience: "call-electron",
+        }),
+      };
     } catch {
-      return res.status(401).json({ error: "invalid_cookie" });
+      return { error: "invalid_cookie" };
+    }
+  }
+  app.get("/auth/me", (req, res) => {
+    const { claims, error } = verifyCookie(req);
+    if (error) return res.status(401).json({ error });
+    return res.json({ ok: true, claims });
+  });
+  app.get("/models", async (req, res) => {
+    const { error } = verifyCookie(req);
+    if (error) return res.status(401).json({ error });
+    if (!modelCatalog) return res.status(503).json({ error: "model_catalog_unavailable" });
+    try {
+      res.set("Cache-Control", "private, max-age=60");
+      return res.json(await modelCatalog.getCatalog());
+    } catch {
+      return res.status(503).json({ error: "model_catalog_unavailable" });
     }
   });
   return app;

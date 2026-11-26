@@ -4,6 +4,7 @@ import { redis } from "./config/redis.js";
 import { loggers } from "./core/logger/index.js";
 import { CONFIG } from "./config/env.js";
 import { createApp } from "./app.js";
+import { createModelCatalog } from "./services/ai/modelCatalog.js";
 import fs from "fs";
 import path from "path";
 const logsDir = path.join(process.cwd(), "logs");
@@ -15,7 +16,14 @@ const wss = startWebSocketServer({
   config: CONFIG,
   handleAuthenticatedConnection: handleConnection,
 });
-const app = createApp({ redisClient: redis, config: CONFIG });
+const modelCatalog = createModelCatalog({
+  provider: CONFIG.AI_PROVIDER,
+  allowedModels: CONFIG.OPENROUTER_ALLOWED_MODELS,
+  defaultModel: CONFIG.OPENROUTER_MODEL,
+  ttlMs: CONFIG.OPENROUTER_CATALOG_TTL_MS,
+  log: loggers.ai,
+});
+const app = createApp({ redisClient: redis, config: CONFIG, modelCatalog });
 app.listen(CONFIG.EXPRESS_PORT, () => {
   log.info(`🚀 Express server listening on port ${CONFIG.EXPRESS_PORT}`);
 });

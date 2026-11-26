@@ -10,8 +10,8 @@ const config = {
   JWT_TTL_SECONDS: 900,
 };
 
-async function withServer(run) {
-  const app = createApp({ redisClient: { status: "ready" }, config });
+async function withServer(run, { modelCatalog } = {}) {
+  const app = createApp({ redisClient: { status: "ready" }, config, modelCatalog });
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
   const { port } = server.address();
@@ -140,4 +140,42 @@ test("createApp requires explicit runtime dependencies", () => {
     () => createApp({ redisClient: { status: "ready" } }),
     /config is required/
   );
+});
+
+test("model catalog requires the auth cookie and returns the injected catalog", async () => {
+  const catalog = {
+    provider: "openrouter",
+    defaultModel: "openai/gpt-5.6-luna",
+    models: [{ id: "openai/gpt-5.6-luna", availability: "unknown" }],
+  };
+  await withServer(async (baseUrl) => {
+    const anonymous = await fetch(`${baseUrl}/models`);
+    assert.equal(anonymous.status, 401);
+    assert.deepEqual(await anonymous.json(), { error: "no_cookie" });
+
+    const forged = await fetch(`${baseUrl}/models`, { headers: { cookie: "call_token=forged" } });
+    assert.equal(forged.status, 401);
+
+    const token = jwt.sign({ app_id: config.APP_ID, device_id: "device-123" }, config.JWT_SECRET, {
+      expiresIn: 60,
+      issuer: "call-backend",
+      audience: "call-electron",
+    });
+    const response = await fetch(`${baseUrl}/models`, { headers: { cookie: `call_token=${token}` } });
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), catalog);
+  }, { modelCatalog: { getCatalog: async () => catalog } });
+});
+
+test("model catalog reports unavailable when no catalog is configured", async () => {
+  const token = jwt.sign({ app_id: config.APP_ID, device_id: "device-123" }, config.JWT_SECRET, {
+    expiresIn: 60,
+    issuer: "call-backend",
+    audience: "call-electron",
+  });
+  await withServer(async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/models`, { headers: { cookie: `call_token=${token}` } });
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), { error: "model_catalog_unavailable" });
+  });
 });

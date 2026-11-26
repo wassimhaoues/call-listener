@@ -277,6 +277,14 @@ async function createWindow(authMgr, audioMgr, capabilities) {
   // ---- Renderer-safe APIs ----------------------------------------------------
   ipcMain.handle("auth:getWsUrl", async () => authMgr.makeSignedWsUrl());
   ipcMain.handle("platform:getCapabilities", () => capabilities);
+  ipcMain.handle("models:list", async () => {
+    try {
+      return await authMgr.fetchModels();
+    } catch (e) {
+      console.error("[models] catalog fetch failed:", e?.message || e);
+      return null;
+    }
+  });
 
   // ---- Auth gate (do NOT expose token to renderer) --------------------------
   try {

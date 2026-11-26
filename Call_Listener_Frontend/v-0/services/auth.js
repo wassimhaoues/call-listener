@@ -109,6 +109,44 @@ class AuthManager {
     return `${this._baseUrl(this.wsProtocol, this.wsPort)}/ws`;
   }
 
+  /**
+   * Fetch the backend's allowlisted model catalog with the main-process token.
+   * Returns only catalog fields so nothing auth-related reaches the renderer.
+   */
+  async fetchModels({ timeoutMs = 5_000 } = {}) {
+    const token = await this.getCachedTokenOrFetch();
+    const body = await new Promise((resolve, reject) => {
+      const req = this.requestClient.request(
+        {
+          hostname: this.backendHost,
+          port: this.backendPort,
+          path: "/models",
+          method: "GET",
+          headers: { Accept: "application/json", Cookie: `call_token=${token}` },
+          timeout: timeoutMs,
+        },
+        (res) => {
+          let buf = "";
+          res.on("data", (d) => (buf += d));
+          res.on("end", () => {
+            if (res.statusCode !== 200) {
+              return reject(new Error(`Models HTTP ${res.statusCode}`));
+            }
+            try {
+              resolve(JSON.parse(buf));
+            } catch (e) {
+              reject(e);
+            }
+          });
+        }
+      );
+      req.on("timeout", () => req.destroy(new Error("Models request timed out")));
+      req.on("error", reject);
+      req.end();
+    });
+    return sanitizeCatalog(body);
+  }
+
   _baseUrl(protocol, port) {
     const defaultPort = protocol === "https" || protocol === "wss" ? 443 : 80;
     const portSuffix = port === defaultPort ? "" : `:${port}`;
@@ -116,4 +154,23 @@ class AuthManager {
   }
 }
 
-module.exports = { AuthManager };
+const AVAILABILITY = new Set(["available", "unavailable", "unknown"]);
+
+function sanitizeCatalog(body) {
+  const models = Array.isArray(body?.models) ? body.models : [];
+  return {
+    provider: typeof body?.provider === "string" ? body.provider : null,
+    defaultModel: typeof body?.defaultModel === "string" ? body.defaultModel : null,
+    models: models
+      .filter((model) => typeof model?.id === "string" && model.id)
+      .slice(0, 50)
+      .map((model) => ({
+        id: model.id,
+        name: typeof model.name === "string" && model.name ? model.name : model.id,
+        availability: AVAILABILITY.has(model.availability) ? model.availability : "unknown",
+        isDefault: model.id === body.defaultModel,
+      })),
+  };
+}
+
+module.exports = { AuthManager, sanitizeCatalog };
