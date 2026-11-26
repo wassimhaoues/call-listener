@@ -205,7 +205,7 @@ export function createPreparationBriefService({ generateReply, limits, isModelAl
     // concurrent requests cannot jointly overspend the daily ceiling.
     let reservation = null;
     if (typeof limits.reserve === "function") {
-      reservation = await limits.reserve(deviceId, { inputChars: system.length + user.length });
+      reservation = await limits.reserve(deviceId, { inputChars: system.length + user.length, model });
       if (!reservation) throw new PreparationError("preparation_budget_reached", 429);
     }
     let settled = false;
@@ -216,7 +216,8 @@ export function createPreparationBriefService({ generateReply, limits, isModelAl
         onModel,
         onUsage: (usage, basis) => {
           settled = true;
-          return limits.recordUsage(deviceId, usage, basis, reservation);
+          // Price with the model the adapter reports, else the selection.
+          return limits.recordUsage(deviceId, usage, { ...basis, model: basis?.model || model }, reservation);
         },
       });
     } catch (error) {
@@ -230,7 +231,7 @@ export function createPreparationBriefService({ generateReply, limits, isModelAl
         await limits.recordUsage(
           deviceId,
           { input_tokens: undefined, output_tokens: 0 },
-          { inputChars: system.length + user.length, outputChars: 0 },
+          { inputChars: system.length + user.length, outputChars: 0, model },
           reservation
         );
       }

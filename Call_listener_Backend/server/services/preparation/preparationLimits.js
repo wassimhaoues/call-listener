@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { estimateTokens } from "../ai/interviewBudget.js";
+import { estimateTokens, pricingFrom } from "../ai/interviewBudget.js";
+import { tokensCostUsd } from "../ai/modelPricing.js";
 
 export const PREPARATION_BUDGET_TTL_SECONDS = 24 * 60 * 60;
 export const PREPARATION_RATE_WINDOW_SECONDS = 60;
@@ -29,6 +30,7 @@ function tokenCount(reported, estimateChars) {
 export function createPreparationLimits({
   redisClient,
   dailyBudgetUsd,
+  pricing: modelPricing,
   inputUsdPerMillionTokens,
   outputUsdPerMillionTokens,
   maxRequestsPerMinute,
@@ -37,16 +39,12 @@ export function createPreparationLimits({
 } = {}) {
   if (!redisClient) throw new TypeError("redisClient is required");
   assertNonNegative(dailyBudgetUsd, "dailyBudgetUsd");
-  assertNonNegative(inputUsdPerMillionTokens, "inputUsdPerMillionTokens");
-  assertNonNegative(outputUsdPerMillionTokens, "outputUsdPerMillionTokens");
+  const pricing = pricingFrom({ pricing: modelPricing, inputUsdPerMillionTokens, outputUsdPerMillionTokens, log });
   if (!Number.isInteger(maxRequestsPerMinute) || maxRequestsPerMinute < 1) {
     throw new TypeError("maxRequestsPerMinute must be a positive integer");
   }
 
   assertNonNegative(maxOutputTokens, "maxOutputTokens");
-
-  const priceUsd = (inputTokens, outputTokens) =>
-    (inputTokens * inputUsdPerMillionTokens + outputTokens * outputUsdPerMillionTokens) / 1_000_000;
 
   const keyId = (deviceId) => createHash("sha256").update(String(deviceId)).digest("hex").slice(0, 32);
   const budgetKey = (deviceId) => `prep:budget:${keyId(deviceId)}`;
@@ -71,16 +69,19 @@ export function createPreparationLimits({
      * concurrent requests can never jointly pass the daily ceiling: a
      * reservation that would exceed it is rolled back and refused. Settle the
      * returned reservation with `recordUsage(..., reservation)` or `release`.
+     * `model` is the selected model; it prices the reservation (an unpriced
+     * or missing model uses the default model's price).
      */
-    async reserve(deviceId, { inputChars = 0 } = {}) {
-      const reservedUsd = priceUsd(estimateTokens(inputChars), maxOutputTokens);
+    async reserve(deviceId, { inputChars = 0, model } = {}) {
+      const price = pricing.priceFor(model);
+      const reservedUsd = tokensCostUsd(price, estimateTokens(inputChars), maxOutputTokens);
       const key = budgetKey(deviceId);
       const spentUsd = await addSpend(key, reservedUsd);
       if (spentUsd > dailyBudgetUsd) {
         await redisClient.incrbyfloat(key, -reservedUsd);
         return null;
       }
-      return { key, reservedUsd };
+      return { key, reservedUsd, model: price.model };
     },
 
     /** Return an unused reservation (the request was never sent). */
@@ -104,12 +105,14 @@ export function createPreparationLimits({
 
     /**
      * Charge one model call. A missing token count is charged with the same
-     * conservative character estimate as the interview budget.
+     * conservative character estimate as the interview budget. The basis's
+     * `actualModel` / `model` (from the adapter) pick the price.
      */
     async recordUsage(deviceId, usage, estimateBasis = {}, reservation = null) {
       const input = tokenCount(usage?.input_tokens ?? usage?.prompt_tokens, estimateBasis.inputChars);
       const output = tokenCount(usage?.output_tokens ?? usage?.completion_tokens, estimateBasis.outputChars);
-      const costUsd = priceUsd(input.tokens, output.tokens);
+      const price = pricing.resolve(estimateBasis);
+      const costUsd = tokensCostUsd(price, input.tokens, output.tokens);
       // With a reservation, only the difference to the reserved amount moves.
       const spentUsd = await addSpend(budgetKey(deviceId), costUsd - (reservation?.reservedUsd || 0));
       const estimated = input.estimated || output.estimated;
@@ -118,7 +121,7 @@ export function createPreparationLimits({
           `Preparation provider reported incomplete usage; charged an estimate of ${input.tokens} input / ${output.tokens} output tokens`
         );
       }
-      return { costUsd, spentUsd, estimated };
+      return { costUsd, spentUsd, estimated, model: price.model };
     },
   };
 }

@@ -168,10 +168,13 @@ export function createOpenRouterReplyGenerator({
         ? await streamReply(client, messages, deadline.signal, onToken)
         : await invokeReply(client, messages, deadline.signal);
       // The character counts let the budget charge a conservative estimate
-      // when the provider omits usage; they carry no transcript text.
+      // when the provider omits usage; they carry no transcript text. The
+      // model IDs let budgets charge the served model's price.
       await onUsage?.(usage, {
         inputChars: String(systemPrompt ?? "").length + String(formattedHistory ?? "").length,
         outputChars: text.length,
+        model: selectedModel,
+        actualModel: actual,
       });
       onModel?.({ selected: selectedModel, actual });
       log?.info(`OpenRouter reply generated (${text.length} chars)`);

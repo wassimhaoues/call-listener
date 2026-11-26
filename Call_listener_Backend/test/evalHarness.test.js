@@ -130,12 +130,17 @@ test("cost guard refuses paid runs without explicit confirmation and a cap", () 
 
   const config = resolveProviderConfig(
     { provider: "openrouter", live: true, maxUsd: "0.5", model: "b/model" },
-    { ...LIVE_ENV, OPENROUTER_MODEL: "a/model", OPENROUTER_ALLOWED_MODELS: "a/model,b/model" }
+    {
+      ...LIVE_ENV,
+      OPENROUTER_MODEL: "a/model",
+      OPENROUTER_ALLOWED_MODELS: "a/model,b/model",
+      OPENROUTER_MODEL_PRICES: JSON.stringify({ "b/model": { input: 3, output: 15 } }),
+    }
   );
   assert.equal(config.model, "b/model");
   assert.equal(config.maxUsd, 0.5);
   assert.equal(config.maxOutputTokens, 600);
-  assert.deepEqual(config.prices, { inputUsdPerMillion: 0.2, outputUsdPerMillion: 1.2 });
+  assert.deepEqual(config.prices, { inputUsdPerMillion: 3, outputUsdPerMillion: 15 }, "the selected model's own price");
 });
 
 test("the CLI refuses --live without --max-usd before building a client", async (t) => {

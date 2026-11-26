@@ -1,4 +1,5 @@
 import { loggers } from "../../core/logger/index.js";
+import { createSinglePricing, tokensCostUsd } from "./modelPricing.js";
 
 const DEFAULT_TTL_SECONDS = 7_200;
 // Rough upper-leaning heuristic used only when the provider omits usage.
@@ -18,13 +19,31 @@ function asNonNegativeNumber(value, label) {
 }
 
 /**
+ * The pricing a budget charges with: a per-model `pricing` (from
+ * modelPricing.js) or, for older callers, one input/output price pair.
+ */
+export function pricingFrom({ pricing, inputUsdPerMillionTokens, outputUsdPerMillionTokens, log } = {}) {
+  if (pricing) {
+    if (typeof pricing.resolve !== "function" || typeof pricing.priceFor !== "function") {
+      throw new TypeError("pricing must come from createModelPricing");
+    }
+    return pricing;
+  }
+  asNonNegativeNumber(inputUsdPerMillionTokens, "inputUsdPerMillionTokens");
+  asNonNegativeNumber(outputUsdPerMillionTokens, "outputUsdPerMillionTokens");
+  return createSinglePricing({ inputUsdPerMillionTokens, outputUsdPerMillionTokens, log });
+}
+
+/**
  * Tracks reported provider usage for one ephemeral interview session. Pricing
  * is passed explicitly so this service never assumes one provider's costs for
- * another provider.
+ * another provider. Each reply is priced with the model that served it, as
+ * the adapter reports in the usage basis (`{ model, actualModel }`).
  */
 export function createInterviewBudget({
   redisClient,
   maxUsd,
+  pricing: modelPricing,
   inputUsdPerMillionTokens,
   outputUsdPerMillionTokens,
   ttlSeconds = DEFAULT_TTL_SECONDS,
@@ -32,8 +51,7 @@ export function createInterviewBudget({
 } = {}) {
   if (!redisClient) throw new TypeError("redisClient is required");
   asNonNegativeNumber(maxUsd, "maxUsd");
-  asNonNegativeNumber(inputUsdPerMillionTokens, "inputUsdPerMillionTokens");
-  asNonNegativeNumber(outputUsdPerMillionTokens, "outputUsdPerMillionTokens");
+  const pricing = pricingFrom({ pricing: modelPricing, inputUsdPerMillionTokens, outputUsdPerMillionTokens, log });
   if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1) {
     throw new TypeError("ttlSeconds must be a positive integer");
   }
@@ -55,7 +73,9 @@ export function createInterviewBudget({
     /**
      * Record one reply's cost. When the provider omits a token count, charge a
      * conservative estimate from `estimateBasis` ({ inputChars, outputChars })
-     * instead of silently recording zero.
+     * instead of silently recording zero. `estimateBasis.actualModel` and
+     * `estimateBasis.model` pick the price; an unpriced or missing model is
+     * charged at the default model's price.
      */
     async recordUsage(sessionId, usage, estimateBasis = {}) {
       const reportedInput = usage?.input_tokens ?? usage?.prompt_tokens;
@@ -79,20 +99,19 @@ export function createInterviewBudget({
           `for session [${sessionId}]; charging an estimate of ${inputTokens} input / ${outputTokens} output tokens`
         );
       }
-      const costUsd = (
-        (inputTokens * inputUsdPerMillionTokens + outputTokens * outputUsdPerMillionTokens) /
-        1_000_000
-      );
+      const price = pricing.resolve(estimateBasis);
+      const costUsd = tokensCostUsd(price, inputTokens, outputTokens);
       const spentUsd = await getSpentUsd(sessionId) + costUsd;
       await redisClient.hset(keyFor(sessionId), {
         spentUsd: String(spentUsd),
         lastInputTokens: String(inputTokens),
         lastOutputTokens: String(outputTokens),
         lastUsageEstimated: estimated ? "1" : "0",
+        lastPricedModel: price.model || "default",
       });
       await redisClient.expire(keyFor(sessionId), ttlSeconds);
       log.debug(`Recorded provider usage for session [${sessionId}]`);
-      return { costUsd, spentUsd, maxUsd, exhausted: spentUsd >= maxUsd, estimated };
+      return { costUsd, spentUsd, maxUsd, exhausted: spentUsd >= maxUsd, estimated, model: price.model };
     },
 
     async clear(sessionId) {
