@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "id": "fr-devops-lea",
+  "description": "Entretien synthétique en français pour un poste d'ingénieure plateforme ; longueur standard. Les noms, entreprises et chiffres sont inventés.",
+  "context": {
+    "version": 1,
+    "candidate": {
+      "name": "Léa Fontaine",
+      "profile": "Ingénieure DevOps depuis quatre ans à l'Atelier Numérique Sorel, responsable de la chaîne de déploiement.",
+      "skills": ["GitLab CI", "Terraform", "Prometheus", "Vault", "Linux"],
+      "achievements": [
+        "Accéléré la chaîne d'intégration continue",
+        "Rédigé les procédures d'astreinte de l'équipe"
+      ]
+    },
+    "jobOffer": {
+      "title": "Ingénieure plateforme",
+      "company": "Banque Coralis",
+      "description": "Faire évoluer la plateforme d'hébergement interne, son observabilité et sa sécurité.",
+      "requirements": [
+        "Intégration continue",
+        "Infrastructure as code",
+        "Observabilité",
+        "Sécurité",
+        "Gestion d'incident"
+      ]
+    },
+    "settings": {
+      "language": "fr",
+      "transcriptionLanguage": "fr",
+      "stage": "technical",
+      "answerLength": "standard"
+    }
+  },
+  "evidence": [
+    {
+      "id": "LEA-E1",
+      "requirement": "Intégration continue",
+      "evidence": "Mis en place des pipelines GitLab CI réduisant le temps de build de 25 à 8 minutes",
+      "keyTerms": ["pipelines GitLab CI", "8 minutes"]
+    },
+    {
+      "id": "LEA-E2",
+      "requirement": "Infrastructure as code",
+      "evidence": "Décrit 60 environnements avec Terraform et des revues de code obligatoires",
+      "keyTerms": ["60 environnements", "revues de code obligatoires"]
+    },
+    {
+      "id": "LEA-E3",
+      "requirement": "Observabilité",
+      "evidence": "Déployé Prometheus et Grafana avec des alertes basées sur des objectifs de service",
+      "keyTerms": ["Grafana", "objectifs de service"]
+    },
+    {
+      "id": "LEA-E4",
+      "requirement": "Sécurité",
+      "evidence": "Automatisé la rotation des secrets avec Vault pour 30 applications",
+      "keyTerms": ["rotation des secrets", "30 applications"]
+    },
+    {
+      "id": "LEA-E5",
+      "requirement": "Gestion d'incident",
+      "evidence": "Rédigé un runbook d'astreinte qui a réduit le temps de rétablissement moyen de moitié",
+      "keyTerms": ["runbook", "temps de rétablissement"]
+    }
+  ],
+  "expectations": {
+    "language": "fr",
+    "answerLength": "standard",
+    "forbiddenClaims": [
+      "Maya Okafor",
+      "Larkspur",
+      "Julien Marchetti",
+      "Brisemer",
+      "Sana Whitfield",
+      "Orchard Lane",
+      "OVHcloud",
+      "Amazon",
+      "AWS",
+      "zéro incident"
+    ]
+  },
+  "questions": [
+    {
+      "id": "lea-q1",
+      "type": "technical",
+      "text": "Comment avez-vous accéléré l'intégration continue ?",
+      "expectedEvidenceIds": ["LEA-E1"]
+    },
+    {
+      "id": "lea-q2",
+      "type": "technical",
+      "text": "Quelle est votre expérience avec Terraform et l'infrastructure as code ?",
+      "expectedEvidenceIds": ["LEA-E2"]
+    },
+    {
+      "id": "lea-q3",
+      "type": "multipart",
+      "text": "Comment gérez-vous l'observabilité avec Prometheus, et comment protégez-vous les secrets ?",
+      "expectedEvidenceIds": ["LEA-E3", "LEA-E4"]
+    },
+    {
+      "id": "lea-q4",
+      "type": "follow-up",
+      "history": [
+        { "speaker": "interviewer", "text": "Parlez-moi d'un incident en production." },
+        { "speaker": "candidate", "text": "Nous avons eu une panne majeure un soir." }
+      ],
+      "text": "Et qu'avez-vous changé ensuite ?",
+      "expectedEvidenceIds": ["LEA-E5"]
+    },
+    {
+      "id": "lea-q5",
+      "type": "no-evidence",
+      "text": "Avez-vous déjà migré une base de données mainframe ?",
+      "expectedEvidenceIds": []
+    },
+    {
+      "id": "lea-q6",
+      "type": "behavioral",
+      "text": "Décrivez une astreinte difficile et ce que vous avez appris.",
+      "expectedEvidenceIds": ["LEA-E5"]
+    }
+  ]
+}

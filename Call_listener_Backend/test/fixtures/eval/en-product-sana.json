@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "id": "en-product-sana",
+  "description": "Synthetic English product-management interview; detailed (STAR) answer length. All names, companies, and metrics are invented.",
+  "context": {
+    "version": 1,
+    "candidate": {
+      "name": "Sana Whitfield",
+      "profile": "Product manager for eight years at Orchard Lane Software, focused on onboarding and growth.",
+      "skills": ["Product discovery", "Experimentation", "Prioritization", "SQL"],
+      "achievements": [
+        "Redesigned the self-serve onboarding experience",
+        "Coordinated a cross-team mobile launch"
+      ]
+    },
+    "jobOffer": {
+      "title": "Lead Product Manager",
+      "company": "Brightwell Learning",
+      "description": "Lead discovery and delivery for an online learning platform, working closely with design, engineering, and sales.",
+      "requirements": [
+        "Product discovery",
+        "Experimentation",
+        "Prioritization",
+        "Cross-functional leadership",
+        "Handling disagreement"
+      ]
+    },
+    "settings": {
+      "language": "en",
+      "transcriptionLanguage": "en",
+      "stage": "behavioral",
+      "answerLength": "detailed"
+    }
+  },
+  "evidence": [
+    {
+      "id": "SANA-E1",
+      "requirement": "Product discovery",
+      "evidence": "Ran 40 customer interviews to redesign the onboarding flow",
+      "keyTerms": ["40 customer interviews", "onboarding flow"]
+    },
+    {
+      "id": "SANA-E2",
+      "requirement": "Experimentation",
+      "evidence": "Ran an A/B test on pricing pages that raised trial conversion from 3.1% to 4.0%",
+      "keyTerms": ["pricing pages", "trial conversion"]
+    },
+    {
+      "id": "SANA-E3",
+      "requirement": "Prioritization",
+      "evidence": "Introduced RICE scoring to rank a backlog of 120 feature requests",
+      "keyTerms": ["RICE scoring", "120 feature requests"]
+    },
+    {
+      "id": "SANA-E4",
+      "requirement": "Cross-functional leadership",
+      "evidence": "Coordinated design, engineering, and support for a mobile app launch reaching 25,000 users",
+      "keyTerms": ["mobile app launch", "25,000 users"]
+    },
+    {
+      "id": "SANA-E5",
+      "requirement": "Handling disagreement",
+      "evidence": "Resolved a roadmap dispute with sales by agreeing on a shared retention metric",
+      "keyTerms": ["roadmap dispute", "retention metric"]
+    }
+  ],
+  "expectations": {
+    "language": "en",
+    "answerLength": "detailed",
+    "forbiddenClaims": [
+      "Maya Okafor",
+      "Larkspur",
+      "Julien Marchetti",
+      "Brisemer",
+      "Léa Fontaine",
+      "Sorel",
+      "Google",
+      "Meta",
+      "Duolingo",
+      "doubled revenue"
+    ]
+  },
+  "questions": [
+    {
+      "id": "sana-q1",
+      "type": "behavioral",
+      "text": "Tell me about a disagreement with sales and how you handled it.",
+      "expectedEvidenceIds": ["SANA-E5"]
+    },
+    {
+      "id": "sana-q2",
+      "type": "technical",
+      "text": "How do you design and evaluate an A/B test?",
+      "expectedEvidenceIds": ["SANA-E2"]
+    },
+    {
+      "id": "sana-q3",
+      "type": "multipart",
+      "text": "How do you prioritize a backlog, and how did you run customer interviews for discovery?",
+      "expectedEvidenceIds": ["SANA-E3", "SANA-E1"]
+    },
+    {
+      "id": "sana-q4",
+      "type": "follow-up",
+      "history": [
+        { "speaker": "interviewer", "text": "Tell me about the mobile app launch you coordinated." },
+        { "speaker": "candidate", "text": "I coordinated design, engineering, and support." }
+      ],
+      "text": "What would you do differently next time?",
+      "expectedEvidenceIds": ["SANA-E4"]
+    },
+    {
+      "id": "sana-q5",
+      "type": "no-evidence",
+      "text": "Have you managed a hardware supply chain?",
+      "expectedEvidenceIds": []
+    },
+    {
+      "id": "sana-q6",
+      "type": "behavioral",
+      "text": "Give an example of a launch you led with engineering and support.",
+      "expectedEvidenceIds": ["SANA-E4"]
+    }
+  ]
+}
