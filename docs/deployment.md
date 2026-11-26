@@ -6,10 +6,15 @@
 
 From `Call_listener_Backend/`, inject application secrets through your deployment secret store or a local Compose environment file; never copy an environment file into the image. The Docker build context excludes `.env*` files. Supply `REDIS_PASSWORD` separately, then run:
 
+The step-by-step VPS procedure (server layout, the `caller.env` file, and the `deploy.sh`, `set-secrets.sh` and `smoke.mjs` scripts) is in [`Call_listener_Backend/scripts/deploy/README.md`](../Call_listener_Backend/scripts/deploy/README.md). In short:
+
 ```bash
-docker compose -f call-listener-stack.yml up --build -d
-docker compose -f call-listener-stack.yml logs -f backend
+CALLER_DOMAIN=caller.example.com CALLER_ENV_FILE=/path/caller.env \
+  docker compose -f call-listener-stack.yml --env-file /path/caller.env -p call-listener up -d --build
+docker logs -f call-backend
 ```
+
+The compose file takes the public host from `CALLER_DOMAIN` (Traefik rules and `COOKIE_DOMAIN`), runs Redis with AOF persistence and `noeviction` (revocations and enrollments never expire and must not be evicted), logs JSON to stdout (`LOG_TO_FILE=0`), and health-checks the backend on `/health`. Live staging: `https://caller.staging.yes-sir.tech`.
 
 The stack creates an internal `callnet` network and requires the external Docker network `edge-net`. Redis is not published externally. Its persistent volume is `redis-data` and it requires a password.
 
