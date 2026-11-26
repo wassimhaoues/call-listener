@@ -20,6 +20,14 @@ launch_and_check() {
   local pid=$!
   sleep "$RUN_SECONDS"
   import -window root "$OUT/$label.png" || echo "screenshot failed"
+  # A window that rendered nothing (e.g. still waiting on startup work) is
+  # nearly uniform: background plus a white rectangle.
+  local colors
+  colors="$(identify -format '%k' "$OUT/$label.png" 2>/dev/null || echo 0)"
+  echo "$label screenshot unique colors: $colors"
+  if [ "$colors" -lt 16 ]; then
+    echo "::warning title=$label window looks blank::Screenshot has $colors colors after ${RUN_SECONDS}s; the renderer may not have loaded."
+  fi
   if ! kill -0 "$pid" 2>/dev/null; then
     echo "$label exited early"; cat "$OUT/$label-stdout.log" "$OUT/$label-stderr.log"
     return 1
