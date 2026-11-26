@@ -206,19 +206,20 @@ function waitFor(ms, signal) {
  * Every attempt shares `deadline`, so retries never extend the request.
  * `run` exposes the attempt count and the last attempt's progress.
  */
-async function runAttempts({ attempt, run, policy, deadline, random, log }) {
-  for (;;) {
-    run.attempts += 1;
-    run.progress = newProgress();
-    try {
-      return await attempt(run.progress);
-    } catch (error) {
-      const waitMs = retryWaitMs({ error, progress: run.progress, attempt: run.attempts, policy, deadline, random });
-      if (waitMs === null) throw error;
-      // Metadata only: the status or connection code, never provider text.
-      log?.warn?.(`OpenRouter attempt ${run.attempts} failed (${failureLabel(error)}); retrying in ${waitMs} ms`);
-      await waitFor(waitMs, deadline.signal);
-    }
+async function runAttempts(context) {
+  const { attempt, run, policy, deadline, random, log } = context;
+  run.attempts += 1;
+  run.progress = newProgress();
+  try {
+    return await attempt(run.progress);
+  } catch (error) {
+    const waitMs = retryWaitMs({ error, progress: run.progress, attempt: run.attempts, policy, deadline, random });
+    if (waitMs === null) throw error;
+    // Metadata only: the status or connection code, never provider text.
+    log?.warn?.(`OpenRouter attempt ${run.attempts} failed (${failureLabel(error)}); retrying in ${waitMs} ms`);
+    await waitFor(waitMs, deadline.signal);
+    // At most MAX_OPENROUTER_RETRIES + 1 attempts, so the recursion is shallow.
+    return runAttempts(context);
   }
 }
 

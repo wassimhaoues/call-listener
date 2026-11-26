@@ -23,6 +23,15 @@
  * is consumed, to exercise the adapter's retries. `instances` records each
  * constructed client's options.
  */
+function providerError(spec) {
+  const error = new Error(spec.message || `synthetic provider error ${spec.status ?? spec.connectionCode}`);
+  error.name = spec.name || "Error";
+  if (spec.status !== undefined) error.status = spec.status;
+  if (spec.headers) error.headers = { ...spec.headers };
+  if (spec.connectionCode) error.cause = { code: spec.connectionCode };
+  return error;
+}
+
 export function createFakeChatOpenRouter({ responses, script = [], failFirst } = {}) {
   const queue = [...script];
   const calls = [];
@@ -57,15 +66,6 @@ export function createFakeChatOpenRouter({ responses, script = [], failFirst } =
     }
     if (spec.thenHang) await untilAborted(signal);
     if (spec.thenError) throw providerError(spec.thenError);
-  }
-
-  function providerError(spec) {
-    const error = new Error(spec.message || `synthetic provider error ${spec.status ?? spec.connectionCode}`);
-    error.name = spec.name || "Error";
-    if (spec.status !== undefined) error.status = spec.status;
-    if (spec.headers) error.headers = { ...spec.headers };
-    if (spec.connectionCode) error.cause = { code: spec.connectionCode };
-    return error;
   }
 
   function respond(spec, signal, call) {
