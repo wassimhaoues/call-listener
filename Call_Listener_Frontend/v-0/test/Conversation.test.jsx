@@ -60,7 +60,7 @@ it("composes capture, socket, and guidance state into the live workspace", async
       context: {
         version: 1,
         evidence: [{ requirement: "Redis", evidence: "Led a Redis migration" }],
-        capabilities: ["stream"],
+        capabilities: ["stream", "resume"],
       },
     },
   ]);
@@ -207,6 +207,38 @@ it("shows the model that produced the current suggestion", async () => {
     ws.serverSend({ ai_reply: "Answer.", model: { selected: "openai/gpt-4o-mini", actual: null } })
   );
   expect(screen.getByText("Model: openai/gpt-4o-mini")).toBeInTheDocument();
+});
+
+it("shows Reconnecting… after a drop and offers a new session once reconnection gives up", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  try {
+    const ws = await renderConversation();
+    act(() => ws.serverSend({ session: { id: "sess-1" } }));
+    act(() => ws.serverClose());
+    expect(screen.getByText("Reconnecting…")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start new session" })).toBeNull();
+
+    // Every attempt fails until the 120 s window is exhausted.
+    for (let elapsed = 0; elapsed <= 121_000; elapsed += 500) {
+      await act(() => vi.advanceTimersByTimeAsync(500));
+      const latest = FakeWebSocket.latest();
+      if (latest !== ws && latest.readyState !== FakeWebSocket.CLOSED) act(() => latest.serverClose());
+    }
+    expect(screen.getByText("Connection lost")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/could not be restored/);
+
+    const attempts = FakeWebSocket.instances.length;
+    fireEvent.click(screen.getByRole("button", { name: "Start new session" }));
+    await act(async () => {});
+    expect(FakeWebSocket.instances).toHaveLength(attempts + 1);
+    const fresh = FakeWebSocket.latest();
+    act(() => fresh.serverOpen());
+    expect(fresh.sentMessages[0].context.capabilities).toEqual(["stream", "resume"]);
+    expect(screen.queryByRole("button", { name: "Start new session" })).toBeNull();
+    expect(screen.getByText("Listening")).toBeInTheDocument();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("tells the candidate to pick another model when the choice is unsupported", async () => {
