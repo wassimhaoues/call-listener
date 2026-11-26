@@ -51,7 +51,7 @@ const iconPng = getAssetPath("icon.png");
 const trayIco = getAssetPath("tray.ico");
 
 // ---- Services ---------------------------------------------------------------
-const { AuthManager } = require("./services/auth");
+const { AuthManager, preparationErrorCode } = require("./services/auth");
 const { classifyAuthFailure } = require("./services/authFailure");
 const { AudioRouteManager } = require("./services/audio");
 const { hardenSessionSecurity } = require("./services/security");
@@ -68,6 +68,10 @@ let tray = null;
 let quitting = false;
 
 app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
 
 function findAsset(relPath) {
   const tries = [
@@ -308,6 +312,22 @@ async function createWindow(authMgr, platformAudio, capabilities) {
     } catch (e) {
       console.error("[models] catalog fetch failed:", e?.message || e);
       return null;
+    }
+  });
+  // Only invoked from the explicit "Improve with AI" action. Returns
+  // `{ ok: true, brief, model }` or `{ ok: false, error: <code> }`; the token
+  // and raw backend responses never reach the renderer.
+  ipcMain.handle("preparation:brief", async (_event, context) => {
+    if (!isPlainObject(context)) return { ok: false, error: "invalid_context" };
+    try {
+      const result = await authMgr.fetchPreparationBrief(context, {
+        model: context.settings?.model,
+        language: context.settings?.language,
+      });
+      return { ok: true, ...result };
+    } catch (e) {
+      console.error("[preparation] brief request failed:", e?.code || "unknown");
+      return { ok: false, error: preparationErrorCode(e?.code) };
     }
   });
 

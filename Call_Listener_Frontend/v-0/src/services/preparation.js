@@ -55,6 +55,37 @@ export function mergePreparationItems(...itemLists) {
   return unique(itemLists.flat());
 }
 
+/**
+ * Map the evidence IDs used by the backend preparation brief back to the
+ * candidate's approved facts: `A<n>` is the n-th achievement and `E<n>` the
+ * n-th requirement-to-evidence reference (1-based, in context order).
+ */
+export function preparationEvidenceIndex(context) {
+  const index = new Map();
+  (context?.candidate?.achievements || []).forEach((text, position) => {
+    index.set(`A${position + 1}`, { kind: "achievement", text });
+  });
+  (context?.evidence || []).forEach((item, position) => {
+    index.set(`E${position + 1}`, { kind: "evidence", text: `${item.requirement} → ${item.evidence}` });
+  });
+  return index;
+}
+
+const AI_PREPARATION_ERRORS = {
+  preparation_budget_reached: "Today's AI preparation budget for this installation is used up. Your local brief is still available.",
+  preparation_rate_limited: "Too many AI preparation requests. Wait a minute, then try again.",
+  preparation_unavailable: "AI preparation is not available on this server. Your local brief is still available.",
+  unsupported_model: "The selected AI model cannot be used for preparation. Choose another model or the server default.",
+  invalid_context: "The preparation details were not accepted. Check your name, job title, and fields, then try again.",
+  unsupported_context_version: "This app version's preparation data is not supported by the server. Update the app.",
+  missing_basics: "Add your name and the job title before improving the brief with AI.",
+};
+
+/** Candidate-facing message for an AI preparation error code. */
+export function aiPreparationErrorMessage(code) {
+  return AI_PREPARATION_ERRORS[code] || "The AI brief could not be generated. Try again later, or keep using your local brief.";
+}
+
 /** Build a reviewable preparation brief from candidate-approved facts only. */
 export function createPreparationBrief({ candidate, jobOffer }) {
   const skills = candidate.skills || [];

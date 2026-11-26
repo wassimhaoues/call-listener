@@ -1,6 +1,6 @@
 /**
  * In-memory subset of the ioredis API used by the session stores and the
- * interview budget. Enough to run the real adapters without a Redis server.
+ * interview and preparation budgets. Enough to run the real adapters without a Redis server.
  */
 export function createMemoryRedis() {
   const strings = new Map();
@@ -26,6 +26,20 @@ export function createMemoryRedis() {
       const existed = strings.delete(key) || lists.delete(key) || hashes.delete(key);
       ttls.delete(key);
       return existed ? 1 : 0;
+    },
+    async incr(key) {
+      const next = Number(strings.get(key) || 0) + 1;
+      strings.set(key, String(next));
+      return next;
+    },
+    async incrbyfloat(key, amount) {
+      const next = Number(strings.get(key) || 0) + Number(amount);
+      strings.set(key, String(next));
+      return String(next);
+    },
+    async ttl(key) {
+      if (!strings.has(key) && !lists.has(key) && !hashes.has(key)) return -2;
+      return ttls.has(key) ? ttls.get(key) : -1;
     },
     async expire(key, seconds) {
       ttls.set(key, seconds);

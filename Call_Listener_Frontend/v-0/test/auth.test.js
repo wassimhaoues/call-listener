@@ -177,3 +177,123 @@ it("bounds the model catalog request even when the socket never idles out", asyn
   await expect(auth.fetchModels({ timeoutMs: 20 })).rejects.toMatchObject({ code: "ETIMEDOUT" });
   expect(requestClient.requests[0].destroyedWith?.code).toBe("ETIMEDOUT");
 });
+
+// A request client that answers once with the given status and JSON body.
+function makeRespondingRequestClient(statusCode, body) {
+  const requests = [];
+  return {
+    requests,
+    request(options, onResponse) {
+      const handlers = {};
+      const req = {
+        options,
+        written: "",
+        on() {
+          return req;
+        },
+        write(chunk) {
+          req.written += chunk;
+        },
+        end() {
+          onResponse({ statusCode, on: (event, handler) => { handlers[event] = handler; } });
+          handlers.data(typeof body === "string" ? body : JSON.stringify(body));
+          handlers.end();
+        },
+        destroy() {},
+      };
+      requests.push(req);
+      return req;
+    },
+  };
+}
+
+const preparationContext = {
+  version: 1,
+  candidate: { name: "Ada", skills: [], achievements: ["Led a migration"] },
+  jobOffer: { title: "Engineer" },
+  settings: { language: "en", model: "openai/test" },
+};
+
+it("posts the preparation context with the main-process cookie and whitelists the brief", async () => {
+  const requestClient = makeRespondingRequestClient(200, {
+    model: "openai/test",
+    token: "must-not-leak",
+    brief: {
+      introduction: "  Hello  ",
+      starExamples: [
+        {
+          requirement: "Migrations",
+          evidenceIds: ["A1", 7, "E1"],
+          situation: "s",
+          task: "t",
+          action: "a",
+          result: "r",
+          html: "<b>x</b>",
+        },
+      ],
+      practiceTopics: ["Topic", 3, ""],
+      questionsToAsk: Array.from({ length: 10 }, (_, index) => `Question ${index}`),
+      missingEvidence: "not a list",
+      extra: "dropped",
+    },
+  });
+  const auth = makeAuth(requestClient);
+  auth.token = "main-process-only-token";
+
+  const result = await auth.fetchPreparationBrief(preparationContext, { model: "openai/test", language: "en" });
+
+  expect(result).toEqual({
+    model: "openai/test",
+    brief: {
+      introduction: "Hello",
+      starExamples: [
+        { requirement: "Migrations", evidenceIds: ["A1", "E1"], situation: "s", task: "t", action: "a", result: "r" },
+      ],
+      practiceTopics: ["Topic"],
+      questionsToAsk: Array.from({ length: 6 }, (_, index) => `Question ${index}`),
+      missingEvidence: [],
+    },
+  });
+  const [req] = requestClient.requests;
+  expect(req.options).toMatchObject({
+    hostname: "call.example.test",
+    path: "/preparation/brief",
+    method: "POST",
+    headers: { Cookie: "call_token=main-process-only-token", "Content-Type": "application/json" },
+  });
+  expect(JSON.parse(req.written)).toEqual({ context: preparationContext, model: "openai/test", language: "en" });
+});
+
+it("maps preparation HTTP errors to known codes only", async () => {
+  const budget = makeAuth(makeRespondingRequestClient(429, { error: "preparation_budget_reached" }));
+  budget.token = "t";
+  await expect(budget.fetchPreparationBrief(preparationContext)).rejects.toMatchObject({
+    code: "preparation_budget_reached",
+    statusCode: 429,
+  });
+
+  const unknown = makeAuth(makeRespondingRequestClient(500, "<html>secret stack</html>"));
+  unknown.token = "t";
+  await expect(unknown.fetchPreparationBrief(preparationContext)).rejects.toMatchObject({
+    code: "preparation_failed",
+    statusCode: 500,
+  });
+
+  const invalid = makeAuth(makeRespondingRequestClient(200, { brief: { introduction: "" } }));
+  invalid.token = "t";
+  await expect(invalid.fetchPreparationBrief(preparationContext)).rejects.toMatchObject({ code: "preparation_failed" });
+});
+
+it("bounds the preparation request with its own deadline", async () => {
+  const { PREPARATION_REQUEST_TIMEOUT_MS } = require("../services/auth.js");
+  expect(PREPARATION_REQUEST_TIMEOUT_MS).toBe(50_000);
+  const requestClient = makeHangingRequestClient();
+  const auth = makeAuth(requestClient);
+  auth.token = "main-process-only-token";
+
+  await expect(auth.fetchPreparationBrief(preparationContext, { timeoutMs: 20 })).rejects.toMatchObject({
+    code: "ETIMEDOUT",
+  });
+  expect(requestClient.requests[0].destroyedWith?.code).toBe("ETIMEDOUT");
+  expect(requestClient.requests[0].options.timeout).toBe(20);
+});
