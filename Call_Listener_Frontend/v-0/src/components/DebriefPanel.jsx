@@ -81,40 +81,34 @@ function ReviewBody({ review, evidence, followUpDraft, onFollowUpDraftChange }) 
         <h2 className="text-sm font-semibold">Topics to improve</h2>
         <ImprovementTopics topics={review.improvementTopics} />
       </section>
-      <section>
-        <h2 className="text-sm font-semibold">
-          <label htmlFor="debrief-follow-up">Follow-up draft</label>
-        </h2>
-        <p className="mt-1 text-xs text-[var(--text-2)]" id="debrief-follow-up-help">
-          Edit it freely. It is never sent anywhere; copy it into your own email if you want to use it.
-        </p>
-        <textarea
-          aria-describedby="debrief-follow-up-help"
-          className="input mt-2 min-h-32 w-full"
-          id="debrief-follow-up"
-          maxLength={MAX_FOLLOW_UP_DRAFT_CHARS}
-          onChange={(event) => onFollowUpDraftChange(event.target.value)}
-          value={followUpDraft}
-        />
-      </section>
+      <TextField
+        help="Edit it freely. It is never sent anywhere; copy it into your own email if you want to use it."
+        id="debrief-follow-up"
+        label="Follow-up draft"
+        maxLength={MAX_FOLLOW_UP_DRAFT_CHARS}
+        onChange={onFollowUpDraftChange}
+        heightClass="min-h-32"
+        value={followUpDraft}
+      />
     </div>
   );
 }
 
-function SelfReviewNotes({ value, onChange }) {
+// A labelled, bounded textarea section with help text (follow-up draft, notes).
+function TextField({ id, label, help, maxLength, value, onChange, heightClass }) {
   return (
     <section>
       <h2 className="text-sm font-semibold">
-        <label htmlFor="debrief-self-notes">Your notes</label>
+        <label htmlFor={id}>{label}</label>
       </h2>
-      <p className="mt-1 text-xs text-[var(--text-2)]" id="debrief-self-notes-help">
-        What went well, what you would answer differently, what to look up. Only you see these; they are exported with the review and never sent anywhere.
+      <p className="mt-1 text-xs text-[var(--text-2)]" id={`${id}-help`}>
+        {help}
       </p>
       <textarea
-        aria-describedby="debrief-self-notes-help"
-        className="input mt-2 min-h-24 w-full"
-        id="debrief-self-notes"
-        maxLength={MAX_SELF_REVIEW_NOTES_CHARS}
+        aria-describedby={`${id}-help`}
+        className={`input mt-2 ${heightClass} w-full`}
+        id={id}
+        maxLength={maxLength}
         onChange={(event) => onChange(event.target.value)}
         value={value}
       />
@@ -178,7 +172,15 @@ export default function DebriefPanel({
           </p>
         )}
         {canWriteSelfReview(status) && (
-          <SelfReviewNotes onChange={onSelfReviewNotesChange} value={state.selfReviewNotes ?? ""} />
+          <TextField
+            help="What went well, what you would answer differently, what to look up. Only you see these; they are exported with the review and never sent anywhere."
+            id="debrief-self-notes"
+            label="Your notes"
+            maxLength={MAX_SELF_REVIEW_NOTES_CHARS}
+            onChange={onSelfReviewNotesChange}
+            heightClass="min-h-24"
+            value={state.selfReviewNotes ?? ""}
+          />
         )}
         <div className="flex flex-wrap gap-2">
           {(ready || (canWriteSelfReview(status) && state.selfReviewNotes?.trim())) && (
