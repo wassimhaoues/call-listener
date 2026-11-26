@@ -8,7 +8,7 @@
       "type": "context",
       "context": "validEn",
       "provider": "introSuccess",
-      "expect": [{ "ai_reply": "Open with your billing migration: scope, risk, and the zero-data-loss result." }]
+      "expect": [{ "ai_reply": "Open with your billing migration: scope, risk, and the zero-data-loss result.", "model": { "selected": "fixture/model", "actual": null } }]
     },
     { "label": "interviewer audio starts", "type": "audio", "source": "system", "bytes": 1920, "count": 1, "expect": [] },
     { "label": "question 1 final", "type": "transcript", "source": "system", "text": "Tell me about a time you led a migration.", "isFinal": true, "expect": [] },
@@ -20,7 +20,7 @@
       "expect": [
         { "speaker": "caller", "transcript": "Tell me about a time you led a migration." },
         { "generation": { "state": "thinking" } },
-        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss." }
+        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss.", "model": { "selected": "fixture/model", "actual": null } }
       ]
     },
     { "label": "question 2 final", "type": "transcript", "source": "system", "text": "How did you keep the cutover safe?", "isFinal": true, "expect": [] },

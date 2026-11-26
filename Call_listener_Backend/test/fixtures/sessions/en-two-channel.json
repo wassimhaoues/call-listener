@@ -8,7 +8,7 @@
       "type": "context",
       "context": "validEn",
       "provider": "introSuccess",
-      "expect": [{ "ai_reply": "Open with your billing migration: scope, risk, and the zero-data-loss result." }]
+      "expect": [{ "ai_reply": "Open with your billing migration: scope, risk, and the zero-data-loss result.", "model": { "selected": "fixture/model", "actual": null } }]
     },
     {
       "label": "malformed frame mid-session keeps the socket usable",
@@ -47,7 +47,7 @@
       "expect": [
         { "speaker": "caller", "transcript": "Tell me about a time you led a migration." },
         { "generation": { "state": "thinking" } },
-        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss." }
+        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss.", "model": { "selected": "fixture/model", "actual": null } }
       ]
     },
     { "label": "candidate answer part 1", "type": "transcript", "source": "mic", "text": "I led the move of our billing service", "isFinal": true, "expect": [] },
@@ -93,7 +93,7 @@
       "expect": [
         { "speaker": "caller", "transcript": "Actually, what would you do differently next time?" },
         { "generation": { "state": "thinking" } },
-        { "ai_reply": "I would rehearse the rollback earlier and automate it." }
+        { "ai_reply": "I would rehearse the rollback earlier and automate it.", "model": { "selected": "fixture/model", "actual": null } }
       ]
     },
     {

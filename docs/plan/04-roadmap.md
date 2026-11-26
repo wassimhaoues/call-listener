@@ -45,8 +45,8 @@ Depends on Phase 1. Outcome: the candidate can choose a supported model without 
 - [x] Introduce a provider-independent AI service and migrate context-intro and reply generation through it.
 - [ ] Implement the LangChain OpenRouter adapter with streaming, AbortSignal propagation, deadline, bounded retries, normalized errors, and usage accounting. **Partially complete:** the non-streaming LangChain adapter accepts propagated `AbortSignal`, enforces a configurable 10-second request deadline, returns normalized provider errors, caps output at 600 tokens, and records reported token usage against the approved session ceiling. One minimal controlled preflight passed with the selected model; live streaming, safe idempotent retries, and multi-scenario provider validation remain.
 - [x] Add conditional provider configuration; OpenRouter mode does not require `GROQ_API_KEY`.
-- [ ] Serve a cached allowlisted model catalog and add the initial model picker to the current UI. Display unavailable models and reject unsupported selections server-side.
-- [ ] Make model choice session-scoped, model changes apply to the next request, and cross-model fallbacks explicit. Enforce per-session request/token/spend limits.
+- [x] Serve a cached allowlisted model catalog and add the initial model picker to the current UI. Display unavailable models and reject unsupported selections server-side.
+- [ ] Make model choice session-scoped, model changes apply to the next request, and cross-model fallbacks explicit. Enforce per-session request/token/spend limits. **Partially complete:** the selected model is stored in the session context, validated against the allowlist, pinned per generation, and re-read for each request; replies report selected and actual model IDs. There is no cross-model fallback. Per-model spend pricing and request limits remain.
 - [ ] Test invalid keys, 429s, timeouts, removed models, unsupported parameters, cancellation, incomplete streams, and missing usage metadata.
 
 Exit gate: at least two model IDs pass controlled end-to-end checks; selected and actual IDs are visible; provider failure leaves audio/transcription intact; old-client final-response behavior still works.
@@ -88,7 +88,7 @@ Rollback: route new generations to the simple interview-aware chain with the sam
 
 Depends on Phase 4. Outcome: a usable interview product, not a renamed generic conversation page.
 
-- [ ] Extract capture, socket lifecycle, transcript state, and generation state from `Conversation.jsx` into tested services/hooks.
+- [x] Extract capture, socket lifecycle, transcript state, and generation state from `Conversation.jsx` into tested services/hooks.
 - [ ] Build panels for current interviewer question, concise answer outline, relevant experience, expandable detail, and transcript. Clearly distinguish spoken candidate answers from generated suggestions. **Partially complete:** the live workspace has separate current-question, safe-guidance, relevant-experience, and transcript panels; detail expansion and explicit answer-outline sections remain.
 - [ ] Add pause/resume, stop, shorten/expand, regenerate, model selection, and clarification actions, with keyboard access and readable focus states. **Partially complete:** keyboard-accessible pause/resume and stop controls are present; pause stops outgoing audio chunks without ending the session. The remaining response/model controls are pending.
 - [ ] Display connecting, ready, listening, thinking, reconnecting, incomplete, and transcription-only states. Retain useful previous output without implying it answers the newest question. **Partially complete:** connecting, ready, listening, paused, backend-confirmed thinking, and terminal guidance-unavailable states are shown; stale guidance is hidden while the current question is generating. Reconnecting/incomplete state handling remains.

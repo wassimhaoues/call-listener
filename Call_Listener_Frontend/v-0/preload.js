@@ -7,6 +7,7 @@ const isDev = process.env.NODE_ENV === "development";
 contextBridge.exposeInMainWorld("callApi", {
   getWsUrl: () => ipcRenderer.invoke("auth:getWsUrl"),
   getPlatformCapabilities: () => ipcRenderer.invoke("platform:getCapabilities"),
+  getModels: () => ipcRenderer.invoke("models:list"),
 });
 
 // Optional: silence console output from renderer in production

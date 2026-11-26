@@ -52,8 +52,8 @@ export class StreamManager {
     this.ContextStore = ContextStore;
     this.generateReply = generateReply;
     this.buildPrompt = buildPrompt;
-    this.runInterviewWorkflow = runInterviewWorkflow || (async ({ context, history, signal, onUsage }) =>
-      this.generateReply(this.buildPrompt(context, "reply"), history, { signal, onUsage }));
+    this.runInterviewWorkflow = runInterviewWorkflow || (async ({ context, history, signal, model, onModel, onUsage }) =>
+      this.generateReply(this.buildPrompt(context, "reply"), history, { signal, model, onModel, onUsage }));
     this.Budget = Budget;
     this.log = log;
     this.streams = {};
@@ -221,6 +221,10 @@ export class StreamManager {
         return;
       }
       const contextStr = contextObj ? JSON.stringify(contextObj) : "";
+      // Session-scoped model choice: read per generation so a settings change
+      // applies to the next request, never to one already in flight.
+      const selectedModel = contextObj?.settings?.model;
+      let modelInfo = null;
       const historyStr = await this.ChatHistory.toPrompt(this.sessionId);
       if (this.wsClient?.readyState === this.wsClient.OPEN) {
         this.wsClient.send(JSON.stringify({ generation: { state: "thinking" } }));
@@ -231,6 +235,8 @@ export class StreamManager {
           history: historyStr,
           signal: generationController.signal,
           onUsage: (usage) => this.Budget?.recordUsage(this.sessionId, usage),
+          model: selectedModel,
+          onModel: (info) => { modelInfo = info; },
         }),
         this.AI_TIMEOUT_MS,
         generationController,
@@ -250,7 +256,9 @@ export class StreamManager {
       if (this.closed || sessionGeneration !== this.generation || questionVersion !== this.questionVersion) return;
       if (this.wsClient?.readyState === this.wsClient.OPEN) {
         try {
-          this.wsClient.send(JSON.stringify({ ai_reply: finalText }));
+          this.wsClient.send(JSON.stringify(
+            modelInfo ? { ai_reply: finalText, model: modelInfo } : { ai_reply: finalText }
+          ));
         } catch (sendError) {
           this.log.error(`❌ WS send failed [${this.sessionId}]: %o`, sendError);
         }

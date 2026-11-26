@@ -83,6 +83,80 @@ test("uses the LangChain OpenRouter adapter without a network call in tests", as
   assert.deepEqual(usage, { input_tokens: 12, output_tokens: 4 });
 });
 
+test("pins an allowlisted per-request model and reports the provider's actual model", async () => {
+  const constructed = [];
+  class FakeChatOpenRouter {
+    constructor({ model }) {
+      constructed.push(model);
+      this.model = model;
+    }
+
+    async invoke() {
+      return {
+        content: `answer from ${this.model}`,
+        response_metadata: { model_name: `${this.model}-20260101` },
+      };
+    }
+  }
+
+  const generateReply = createAiReplyGenerator({
+    provider: "openrouter",
+    openRouterApiKey: "openrouter-test-key",
+    openRouterModel: "openai/gpt-4.1-mini",
+    openRouterAllowedModels: ["openai/gpt-4.1-mini", "anthropic/claude-test"],
+    log: silentLog,
+    dependencies: { openrouter: { ChatOpenRouterClass: FakeChatOpenRouter } },
+  });
+
+  const seen = [];
+  const onModel = (info) => seen.push(info);
+  assert.equal(await generateReply("s", "h", { onModel }), "answer from openai/gpt-4.1-mini");
+  assert.equal(
+    await generateReply("s", "h", { model: "anthropic/claude-test", onModel }),
+    "answer from anthropic/claude-test"
+  );
+  await generateReply("s", "h", { model: "anthropic/claude-test", onModel });
+  assert.deepEqual(constructed, ["openai/gpt-4.1-mini", "anthropic/claude-test"], "clients are reused per model");
+  assert.deepEqual(seen, [
+    { selected: "openai/gpt-4.1-mini", actual: "openai/gpt-4.1-mini-20260101" },
+    { selected: "anthropic/claude-test", actual: "anthropic/claude-test-20260101" },
+    { selected: "anthropic/claude-test", actual: "anthropic/claude-test-20260101" },
+  ]);
+
+  await assert.rejects(
+    generateReply("s", "h", { model: "not/allowlisted" }),
+    (error) => error.code === "unsupported_model"
+  );
+  assert.equal(constructed.length, 2);
+});
+
+test("the Groq rollback adapter ignores per-request model overrides", async () => {
+  let request;
+  class FakeGroq {
+    constructor() {
+      this.chat = {
+        completions: {
+          create: async (payload) => {
+            request = payload;
+            return { model: "groq-actual", choices: [{ message: { content: "ok" } }] };
+          },
+        },
+      };
+    }
+  }
+  const generateReply = createAiReplyGenerator({
+    provider: "groq",
+    groqApiKey: "groq-test-key",
+    groqModel: "test-groq-model",
+    log: silentLog,
+    dependencies: { groq: { GroqClient: FakeGroq } },
+  });
+  let info;
+  await generateReply("s", "h", { model: "other/model", onModel: (value) => { info = value; } });
+  assert.equal(request.model, "test-groq-model");
+  assert.deepEqual(info, { selected: "test-groq-model", actual: "groq-actual" });
+});
+
 test("normalizes an OpenRouter request deadline without retrying the request", async () => {
   let calls = 0;
   class SlowChatOpenRouter {

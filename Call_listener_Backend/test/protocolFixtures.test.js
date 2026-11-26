@@ -21,7 +21,7 @@ for (const [name, fixture] of Object.entries(contexts.valid)) {
     const harness = createReplayHarness({ responses, contexts, providerScript: ["introSuccess"] });
     await harness.send({ context: fixture.payload });
 
-    assert.deepEqual(harness.outbound, [{ ai_reply: responses.introSuccess.content }]);
+    assert.deepEqual(harness.outbound, [{ ai_reply: responses.introSuccess.content, model: { selected: "fixture/model", actual: null } }]);
     assert.deepEqual(await harness.ContextStore.get(harness.sessionId), parsed);
     assert.equal(harness.streamManager.transcriptionLanguage, fixture.expect.transcriptionLanguage);
     if (fixture.expect.kind === "candidate") {
@@ -70,5 +70,5 @@ test("malformed client frames are rejected without side effects and the socket s
   assert.deepEqual(await harness.ChatHistory.get(harness.sessionId), []);
 
   await harness.send({ context: contexts.valid.validEn.payload });
-  assert.deepEqual(harness.outbound.at(-1), { ai_reply: responses.introSuccess.content });
+  assert.deepEqual(harness.outbound.at(-1), { ai_reply: responses.introSuccess.content, model: { selected: "fixture/model", actual: null } });
 });

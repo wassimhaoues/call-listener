@@ -28,7 +28,10 @@ function nextTick() {
   return new Promise((resolve) => setImmediate(resolve));
 }
 
-function createManager({ generateReply = async () => "A concise answer." } = {}) {
+function createManager({
+  generateReply = async () => "A concise answer.",
+  getContext = async () => ({ candidate: "Ada" }),
+} = {}) {
   const streams = [];
   const history = [];
   const manager = new StreamManager("session-1", {
@@ -41,7 +44,7 @@ function createManager({ generateReply = async () => "A concise answer." } = {})
       push: async (...entry) => history.push(entry),
       toPrompt: async () => "caller: Tell me about a migration.",
     },
-    ContextStore: { get: async () => ({ candidate: "Ada" }) },
+    ContextStore: { get: getContext },
     generateReply,
     buildPrompt: () => "reply prompt",
     log: { info() {}, debug() {}, warn() {}, error() {} },
@@ -135,6 +138,42 @@ test("runs a typed interviewer question through the same transcript and guidance
   ]);
   assert.deepEqual(sent.filter((message) => message.ai_reply), [
     { ai_reply: "A concise answer." },
+  ]);
+});
+
+test("reads the session model per generation so a change applies to the next request", async () => {
+  let context = { settings: { model: "openai/gpt-5.6-luna" } };
+  const requested = [];
+  const { manager } = createManager({
+    getContext: async () => context,
+    generateReply: async (_prompt, _history, { model, onModel }) => {
+      requested.push(model);
+      onModel?.({ selected: model, actual: model });
+      return `answer from ${model}`;
+    },
+  });
+  manager.REPLY_COOLDOWN_MS = 0;
+  const sent = [];
+  const wsClient = { OPEN: 1, readyState: 1, send: (payload) => sent.push(JSON.parse(payload)) };
+
+  await manager.submitInterviewerQuestion("How did you lead the migration?", wsClient);
+  await nextTick();
+  await nextTick();
+  context = { settings: { model: "anthropic/claude-test" } };
+  await manager.submitInterviewerQuestion("What would you change next time?", wsClient);
+  await nextTick();
+  await nextTick();
+
+  assert.deepEqual(requested, ["openai/gpt-5.6-luna", "anthropic/claude-test"]);
+  assert.deepEqual(sent.filter((message) => message.ai_reply), [
+    {
+      ai_reply: "answer from openai/gpt-5.6-luna",
+      model: { selected: "openai/gpt-5.6-luna", actual: "openai/gpt-5.6-luna" },
+    },
+    {
+      ai_reply: "answer from anthropic/claude-test",
+      model: { selected: "anthropic/claude-test", actual: "anthropic/claude-test" },
+    },
   ]);
 });
 

@@ -67,7 +67,7 @@ for (const providerCase of cases) {
     await harness.settle();
 
     const outcome = providerCase.session.outcome === "reply"
-      ? { ai_reply: providerCase.adapter.text }
+      ? { ai_reply: providerCase.adapter.text, model: { selected: "fixture/model", actual: null } }
       : { generation: { state: "failed" }, ai_reply: "[Erreur du modèle]" };
     assert.deepEqual(harness.outbound, [
       { speaker: "caller", transcript: QUESTION },

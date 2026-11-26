@@ -8,6 +8,7 @@ export function createAiReplyGenerator({
   groqModel,
   openRouterApiKey,
   openRouterModel,
+  openRouterAllowedModels,
   openRouterMaxOutputTokens,
   openRouterRequestTimeoutMs,
   log,
@@ -25,6 +26,7 @@ export function createAiReplyGenerator({
     return createOpenRouterReplyGenerator({
       apiKey: openRouterApiKey,
       model: openRouterModel,
+      allowedModels: openRouterAllowedModels,
       maxOutputTokens: openRouterMaxOutputTokens,
       requestTimeoutMs: openRouterRequestTimeoutMs,
       log,

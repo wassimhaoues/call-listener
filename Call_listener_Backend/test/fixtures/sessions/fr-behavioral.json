@@ -8,7 +8,7 @@
       "type": "context",
       "context": "validFr",
       "provider": "introFr",
-      "expect": [{ "ai_reply": "Commencez par la refonte du portail client et son résultat." }]
+      "expect": [{ "ai_reply": "Commencez par la refonte du portail client et son résultat.", "model": { "selected": "fixture/model", "actual": null } }]
     },
     { "label": "audio intervieweur", "type": "audio", "source": "system", "bytes": 1920, "count": 1, "expect": [] },
     { "label": "audio candidate", "type": "audio", "source": "mic", "bytes": 1920, "count": 1, "expect": [] },
@@ -23,7 +23,7 @@
       "expect": [
         { "speaker": "caller", "transcript": "Parlez-moi de votre dernier projet." },
         { "generation": { "state": "thinking" } },
-        { "ai_reply": "Situation : portail client vieillissant. Action : livraisons courtes. Résultat : livré en avance." }
+        { "ai_reply": "Situation : portail client vieillissant. Action : livraisons courtes. Résultat : livré en avance.", "model": { "selected": "fixture/model", "actual": null } }
       ]
     },
     { "label": "réponse candidate", "type": "transcript", "source": "mic", "text": "J'ai piloté la refonte du portail client.", "isFinal": true, "expect": [] },
@@ -56,7 +56,7 @@
       "expect": [
         { "speaker": "caller", "transcript": "Pourquoi avez-vous choisi ce poste" },
         { "generation": { "state": "thinking" } },
-        { "ai_reply": "Reliez le poste à votre expérience de pilotage de projet." }
+        { "ai_reply": "Reliez le poste à votre expérience de pilotage de projet.", "model": { "selected": "fixture/model", "actual": null } }
       ]
     },
     { "label": "remerciement", "type": "transcript", "source": "system", "text": "Merci.", "isFinal": true, "expect": [] },

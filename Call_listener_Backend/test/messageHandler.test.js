@@ -8,7 +8,7 @@ import {
   MAX_TYPED_INTERVIEWER_QUESTION_CHARS,
 } from "../server/websocket/handlers/messageHandler.js";
 
-function createHarness() {
+function createHarness({ isModelAllowed } = {}) {
   const calls = {
     contexts: [],
     prompts: [],
@@ -39,10 +39,15 @@ function createHarness() {
       calls.prompts.push({ context, mode });
       return "prompt";
     },
-    generateReply: async (prompt, history) => {
+    generateReply: async (prompt, history, options = {}) => {
       calls.replies.push({ prompt, history });
+      if (options.model) {
+        calls.models = [...(calls.models || []), options.model];
+        options.onModel?.({ selected: options.model, actual: `${options.model}-2026` });
+      }
       return "Use one concise STAR example.";
     },
+    isModelAllowed,
     log: { info() {}, warn() {}, error() {} },
   });
 
@@ -94,6 +99,36 @@ test("stores context and returns the intro suggestion", async () => {
     { prompt: "prompt", history: "candidate: I led the migration" },
   ]);
   assert.deepEqual(harness.sent, [{ ai_reply: "Use one concise STAR example." }]);
+});
+
+test("rejects a model outside the allowlist without storing context or generating", async () => {
+  const harness = createHarness({ isModelAllowed: (id) => id === "openai/gpt-5.6-luna" });
+
+  await harness.run({ context: { settings: { model: "other/model" } } });
+
+  assert.deepEqual(harness.calls.contexts, []);
+  assert.deepEqual(harness.calls.replies, []);
+  assert.deepEqual(harness.sent, [{ error: "unsupported_model" }]);
+});
+
+test("rejects any explicit model when no allowlist is injected", async () => {
+  const harness = createHarness();
+  await harness.run({ context: { settings: { model: "openai/gpt-5.6-luna" } } });
+  assert.deepEqual(harness.sent, [{ error: "unsupported_model" }]);
+});
+
+test("pins an allowlisted model for the intro and reports selected and actual IDs", async () => {
+  const harness = createHarness({ isModelAllowed: (id) => id === "openai/gpt-5.6-luna" });
+  const context = { settings: { model: "openai/gpt-5.6-luna" } };
+
+  await harness.run({ context });
+
+  assert.deepEqual(harness.calls.contexts, [{ sessionId: "session-1", context }]);
+  assert.deepEqual(harness.calls.models, ["openai/gpt-5.6-luna"]);
+  assert.deepEqual(harness.sent, [{
+    ai_reply: "Use one concise STAR example.",
+    model: { selected: "openai/gpt-5.6-luna", actual: "openai/gpt-5.6-luna-2026" },
+  }]);
 });
 
 test("does not generate an introduction after the session budget is exhausted", async () => {
