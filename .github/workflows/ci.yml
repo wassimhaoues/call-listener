@@ -180,8 +180,17 @@ jobs:
         run: |
           $electron = node -p "require('electron')" | Select-Object -Last 1
           if (-not (Test-Path $electron)) { throw "Electron binary not found: $electron" }
-          & $electron scripts/ci/audioRestore.cjs bin/SoundVolumeView.exe ci-audio
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # electron.exe is a GUI-subsystem binary: PowerShell's `&` does not
+          # wait for it, so the step would end (and the runner kill the script)
+          # before the scenarios finish. Start-Process -Wait waits for exit.
+          New-Item -ItemType Directory -Force -Path ci-audio | Out-Null
+          $proc = Start-Process -FilePath $electron `
+            -ArgumentList "scripts/ci/audioRestore.cjs", "bin/SoundVolumeView.exe", "ci-audio" `
+            -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput ci-audio/stdout.log -RedirectStandardError ci-audio/stderr.log
+          Get-Content ci-audio/stdout.log, ci-audio/stderr.log -ErrorAction SilentlyContinue
+          Write-Host "audio scenarios exit code: $($proc.ExitCode)"
+          if ($proc.ExitCode -ne 0) { exit $proc.ExitCode }
       - uses: actions/upload-artifact@v4
         if: always()
         with:
