@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("callApi", {
   getWsUrl: () => ipcRenderer.invoke("auth:getWsUrl"),
   getPlatformCapabilities: () => ipcRenderer.invoke("platform:getCapabilities"),
   getModels: () => ipcRenderer.invoke("models:list"),
+  // Explicit candidate action only: resolves { ok, brief, model } or { ok: false, error }.
+  generatePreparationBrief: (context) => ipcRenderer.invoke("preparation:brief", context),
   // Renderer-safe diagnostics snapshot (no host identifiers, no paths).
   getDiagnostics: () => ipcRenderer.invoke("diagnostics:get"),
 });

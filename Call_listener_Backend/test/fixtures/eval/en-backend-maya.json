@@ -1,0 +1,138 @@
+{
+  "version": 1,
+  "id": "en-backend-maya",
+  "description": "Synthetic English backend-engineering interview; standard answer length. All names, companies, and metrics are invented.",
+  "context": {
+    "version": 1,
+    "candidate": {
+      "name": "Maya Okafor",
+      "profile": "Backend engineer with six years of experience building logistics APIs at Larkspur Freight.",
+      "skills": ["Node.js", "PostgreSQL", "Kafka", "Kubernetes", "TypeScript"],
+      "achievements": [
+        "Designed the shipment event pipeline at Larkspur Freight",
+        "Led the move of core services to Kubernetes"
+      ]
+    },
+    "jobOffer": {
+      "title": "Senior Backend Engineer",
+      "company": "Tidewater Health",
+      "description": "Build reliable patient-scheduling APIs, own database performance, and mentor engineers.",
+      "requirements": [
+        "Event-driven architecture",
+        "Database performance",
+        "Mentoring",
+        "Incident response",
+        "Cloud migration",
+        "Stakeholder communication"
+      ]
+    },
+    "settings": {
+      "language": "en",
+      "transcriptionLanguage": "en",
+      "stage": "technical",
+      "answerLength": "standard"
+    }
+  },
+  "evidence": [
+    {
+      "id": "MAYA-E1",
+      "requirement": "Event-driven architecture",
+      "evidence": "Designed a Kafka pipeline at Larkspur Freight that processed 2 million shipment events per day",
+      "keyTerms": ["Kafka pipeline", "2 million"]
+    },
+    {
+      "id": "MAYA-E2",
+      "requirement": "Database performance",
+      "evidence": "Cut PostgreSQL p95 query latency from 900 ms to 120 ms by adding partial indexes",
+      "keyTerms": ["partial indexes", "900 ms"]
+    },
+    {
+      "id": "MAYA-E3",
+      "requirement": "Mentoring",
+      "evidence": "Mentored four junior engineers through a structured onboarding plan",
+      "keyTerms": ["four junior engineers", "onboarding plan"]
+    },
+    {
+      "id": "MAYA-E4",
+      "requirement": "Incident response",
+      "evidence": "Led the on-call rotation and wrote the postmortem template used by 6 teams",
+      "keyTerms": ["postmortem template", "on-call rotation"]
+    },
+    {
+      "id": "MAYA-E5",
+      "requirement": "Cloud migration",
+      "evidence": "Migrated 14 services from virtual machines to Kubernetes with zero downtime",
+      "keyTerms": ["14 services", "zero downtime"]
+    },
+    {
+      "id": "MAYA-E6",
+      "requirement": "Stakeholder communication",
+      "evidence": "Presented a quarterly API roadmap to operations managers",
+      "keyTerms": ["API roadmap", "operations managers"]
+    }
+  ],
+  "expectations": {
+    "language": "en",
+    "answerLength": "standard",
+    "forbiddenClaims": [
+      "Julien Marchetti",
+      "Brisemer",
+      "Sana Whitfield",
+      "Orchard Lane",
+      "Léa Fontaine",
+      "Sorel",
+      "Google",
+      "Amazon",
+      "Netflix",
+      "10x"
+    ]
+  },
+  "questions": [
+    {
+      "id": "maya-q1",
+      "type": "behavioral",
+      "text": "Tell me about a time you mentored a junior engineer.",
+      "expectedEvidenceIds": ["MAYA-E3"]
+    },
+    {
+      "id": "maya-q2",
+      "type": "technical",
+      "text": "How did you improve database query performance with PostgreSQL?",
+      "expectedEvidenceIds": ["MAYA-E2"]
+    },
+    {
+      "id": "maya-q3",
+      "type": "multipart",
+      "text": "Can you describe your Kafka event pipeline, and how you handled the Kubernetes migration?",
+      "expectedEvidenceIds": ["MAYA-E1", "MAYA-E5"]
+    },
+    {
+      "id": "maya-q4",
+      "type": "follow-up",
+      "history": [
+        { "speaker": "interviewer", "text": "Tell me about an incident you handled." },
+        { "speaker": "candidate", "text": "I led our on-call rotation during a major outage." }
+      ],
+      "text": "What did you change afterwards?",
+      "expectedEvidenceIds": ["MAYA-E4"]
+    },
+    {
+      "id": "maya-q5",
+      "type": "no-evidence",
+      "text": "Have you worked with Rust in production?",
+      "expectedEvidenceIds": []
+    },
+    {
+      "id": "maya-q6",
+      "type": "technical",
+      "text": "How do you approach incident response and postmortems?",
+      "expectedEvidenceIds": ["MAYA-E4"]
+    },
+    {
+      "id": "maya-q7",
+      "type": "behavioral",
+      "text": "Tell me about presenting a roadmap to non-technical stakeholders.",
+      "expectedEvidenceIds": ["MAYA-E6"]
+    }
+  ]
+}

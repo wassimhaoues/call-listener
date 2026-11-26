@@ -5,6 +5,7 @@ import { loggers } from "./core/logger/index.js";
 import { CONFIG } from "./config/env.js";
 import { createApp } from "./app.js";
 import { createModelCatalog } from "./services/ai/modelCatalog.js";
+import { createConfiguredPreparationBrief } from "./services/preparation/configuredPreparation.js";
 import fs from "fs";
 import path from "path";
 const logsDir = path.join(process.cwd(), "logs");
@@ -23,7 +24,12 @@ const modelCatalog = createModelCatalog({
   ttlMs: CONFIG.OPENROUTER_CATALOG_TTL_MS,
   log: loggers.ai,
 });
-const app = createApp({ redisClient: redis, config: CONFIG, modelCatalog });
+const preparationBrief = createConfiguredPreparationBrief({
+  config: CONFIG,
+  redisClient: redis,
+  log: loggers.ai,
+});
+const app = createApp({ redisClient: redis, config: CONFIG, modelCatalog, preparationBrief });
 app.listen(CONFIG.EXPRESS_PORT, () => {
   log.info(`🚀 Express server listening on port ${CONFIG.EXPRESS_PORT}`);
 });
