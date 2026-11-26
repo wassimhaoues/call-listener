@@ -9,24 +9,31 @@ const contexts = loadContexts();
 const { responses, cases } = loadProviderResponses();
 const silentLog = { info() {}, error() {} };
 const QUESTION = "How did you lead the migration?";
+// Production retry rules (one retry) without the real backoff wait.
+const FAST_RETRIES = { minDelayMs: 0, maxDelayMs: 0, minAttemptMs: 0 };
 
-function createGenerator(responseName, requestTimeoutMs = 10_000) {
-  const provider = createFakeChatOpenRouter({ responses, script: [responseName] });
+function scriptFor(providerCase) {
+  return providerCase.script ?? [providerCase.response];
+}
+
+function createGenerator(script, requestTimeoutMs = 10_000) {
+  const provider = createFakeChatOpenRouter({ responses, script });
   const generateReply = createAiReplyGenerator({
     provider: "openrouter",
     openRouterApiKey: "fixture-key-not-a-secret",
     openRouterModel: "fixture/model",
     openRouterMaxOutputTokens: 600,
     openRouterRequestTimeoutMs: requestTimeoutMs,
+    openRouterMaxRetries: 1,
     log: silentLog,
-    dependencies: { openrouter: { ChatOpenRouterClass: provider.ChatOpenRouterClass } },
+    dependencies: { openrouter: { ChatOpenRouterClass: provider.ChatOpenRouterClass, retryPolicy: FAST_RETRIES } },
   });
   return { provider, generateReply };
 }
 
 for (const providerCase of cases) {
   test(`OpenRouter adapter: ${providerCase.name}`, async () => {
-    const { provider, generateReply } = createGenerator(providerCase.response, providerCase.requestTimeoutMs);
+    const { provider, generateReply } = createGenerator(scriptFor(providerCase), providerCase.requestTimeoutMs);
     const controller = new AbortController();
     const usage = [];
     const bases = [];
@@ -58,9 +65,10 @@ for (const providerCase of cases) {
         outputChars: adapter.text.length,
         model: "fixture/model",
         actualModel: null,
+        attempts: providerCase.calls ?? 1,
       }], "usage is reported with char counts for a fallback estimate and the model to price");
     }
-    assert.equal(provider.calls.length, 1, "the adapter never retries");
+    assert.equal(provider.calls.length, providerCase.calls ?? 1, "only safe failures are retried, at most once");
   });
 
   if (!providerCase.session) continue;
@@ -69,8 +77,10 @@ for (const providerCase of cases) {
     const harness = createReplayHarness({
       responses,
       contexts,
-      providerScript: [providerCase.response],
+      providerScript: scriptFor(providerCase),
       requestTimeoutMs: providerCase.requestTimeoutMs,
+      maxRetries: 1,
+      retryPolicy: FAST_RETRIES,
     });
     await harness.send({ interviewer_question: QUESTION });
     await harness.waitForOutbound(3, `the ${providerCase.name} outcome`);
@@ -92,7 +102,7 @@ for (const providerCase of cases) {
     // `costUsd` is the reported-usage cost; a reply without usage is charged
     // a conservative char-based estimate on top, never recorded as free.
     const expectedCostUsd = providerCase.session.costUsd + (providerCase.session.estimatedUsage
-      ? estimatedCostUsd(harness.provider.calls[0], responses[providerCase.response])
+      ? estimatedCostUsd(harness.provider.calls.at(-1), responses[scriptFor(providerCase).at(-1)])
       : 0);
     assert.equal(harness.estimatedUsage.length, providerCase.session.estimatedUsage ? 1 : 0);
     const { spentUsd } = await harness.Budget.canGenerate(harness.sessionId);

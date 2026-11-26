@@ -20,6 +20,7 @@ export function createConfiguredPreparationBrief({ config, redisClient, log, Cha
     allowedModels: config.OPENROUTER_ALLOWED_MODELS,
     maxOutputTokens: config.PREPARATION_MAX_OUTPUT_TOKENS,
     requestTimeoutMs: config.PREPARATION_REQUEST_TIMEOUT_MS,
+    maxRetries: config.OPENROUTER_MAX_RETRIES,
     log,
     ...(ChatOpenRouterClass ? { ChatOpenRouterClass } : {}),
   });

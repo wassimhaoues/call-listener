@@ -27,6 +27,9 @@ const CONFIG = {
   OPENROUTER_CATALOG_TTL_MS: Number(process.env.OPENROUTER_CATALOG_TTL_MS || 10 * 60_000),
   OPENROUTER_MAX_OUTPUT_TOKENS: Number(process.env.OPENROUTER_MAX_OUTPUT_TOKENS || 600),
   OPENROUTER_REQUEST_TIMEOUT_MS: Number(process.env.OPENROUTER_REQUEST_TIMEOUT_MS || 10_000),
+  // Safe retries of a failed provider attempt, inside the same request
+  // deadline (see docs/plan/provider-retries.md).
+  OPENROUTER_MAX_RETRIES: Number(process.env.OPENROUTER_MAX_RETRIES || 1),
   MAX_INTERVIEW_COST_USD: Number(process.env.MAX_INTERVIEW_COST_USD || 5),
   // How long a disconnected resume-capable session is kept for `{ resume }`.
   RESUME_WINDOW_MS: Number(process.env.RESUME_WINDOW_MS || 120_000),
@@ -64,6 +67,9 @@ for (const key of ["AUTH_RATE_LIMIT_PER_MINUTE"]) {
 }
 if (!Number.isInteger(CONFIG.TRUST_PROXY_HOPS) || CONFIG.TRUST_PROXY_HOPS < 0 || CONFIG.TRUST_PROXY_HOPS > 5) {
   throw new Error("TRUST_PROXY_HOPS must be an integer between 0 and 5");
+}
+if (!Number.isInteger(CONFIG.OPENROUTER_MAX_RETRIES) || CONFIG.OPENROUTER_MAX_RETRIES < 0 || CONFIG.OPENROUTER_MAX_RETRIES > 2) {
+  throw new Error("OPENROUTER_MAX_RETRIES must be an integer between 0 and 2");
 }
 if (
   !Number.isInteger(CONFIG.MAX_DISCONNECTED_SESSIONS_PER_OWNER) ||

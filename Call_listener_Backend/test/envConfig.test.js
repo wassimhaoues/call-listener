@@ -76,6 +76,27 @@ test("OpenRouter configuration does not require a Groq key", async () => {
   assert.equal(stdout, "openrouter");
 });
 
+function loadMaxRetries(env) {
+  return execFileAsync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { CONFIG } from ${JSON.stringify(envModuleUrl)}; process.stdout.write(String(CONFIG.OPENROUTER_MAX_RETRIES));`,
+    ],
+    { cwd: os.tmpdir(), env: { ...baseEnv, ...env } }
+  );
+}
+
+test("OPENROUTER_MAX_RETRIES defaults to one retry and accepts only 0 to 2", async () => {
+  assert.equal((await loadMaxRetries({})).stdout, "1");
+  assert.equal((await loadMaxRetries({ OPENROUTER_MAX_RETRIES: "0" })).stdout, "0");
+  assert.equal((await loadMaxRetries({ OPENROUTER_MAX_RETRIES: "2" })).stdout, "2");
+  for (const value of ["3", "-1", "1.5", "many"]) {
+    await assert.rejects(loadMaxRetries({ OPENROUTER_MAX_RETRIES: value }), /OPENROUTER_MAX_RETRIES/);
+  }
+});
+
 const PREPARATION_KEYS = [
   "PREPARATION_DAILY_BUDGET_USD",
   "PREPARATION_MAX_OUTPUT_TOKENS",

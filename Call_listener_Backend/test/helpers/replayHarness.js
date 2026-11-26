@@ -33,6 +33,10 @@ export function createReplayHarness({
   inputUsdPerMillionTokens = 0.2,
   outputUsdPerMillionTokens = 1.2,
   requestTimeoutMs = 10_000,
+  // Replays script one provider response per request unless a test opts in
+  // to retries (and then scripts the retried attempts too).
+  maxRetries = 0,
+  retryPolicy,
   // Replays flush streamed deltas only on completion so they stay timer-free
   // and deterministic; time-based batching is covered by unit tests.
   streamFlushMs = 60_000,
@@ -71,8 +75,9 @@ export function createReplayHarness({
     openRouterModel: "fixture/model",
     openRouterMaxOutputTokens: 600,
     openRouterRequestTimeoutMs: requestTimeoutMs,
+    openRouterMaxRetries: maxRetries,
     log: silentLog,
-    dependencies: { openrouter: { ChatOpenRouterClass: provider.ChatOpenRouterClass } },
+    dependencies: { openrouter: { ChatOpenRouterClass: provider.ChatOpenRouterClass, retryPolicy } },
   });
   const workflow = createInterviewWorkflow({ buildPrompt, generateReply });
 
