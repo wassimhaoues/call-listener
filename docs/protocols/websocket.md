@@ -4,7 +4,7 @@ The desktop client connects to `wss://<host>/ws` after obtaining a token from th
 
 ## Client messages
 
-The server checks each frame in this order and handles the first match: `resume` (first frame of a connection only), `context`, `end`, `interviewer_question`, then audio.
+The server checks each frame in this order and handles the first match: `resume` (first frame of a connection only), `context`, `end`, `action`, `interviewer_question`, then audio.
 
 | Message | Shape | Notes |
 | --- | --- | --- |
@@ -12,6 +12,7 @@ The server checks each frame in this order and handles the first match: `resume`
 | Context | `{ "context": { ... } }` | Stored for the session. The current legacy payload uses `caller.*` and `me.*`; it will be replaced by versioned candidate/job-offer fields in Phase 3. The server immediately returns an introductory suggestion. Versioned contexts may set an optional `settings.model` to an ID from `GET /models`; omit it to use the server default. A model outside the server allowlist is rejected with `{ "error": "unsupported_model" }` and the previous session context stays in effect. Sending a new context with a different model changes the model for the next generation only. If the interview budget is already spent, the context is stored but the server sends `{ "error": "interview_budget_reached" }` instead of the introductory suggestion. A context may also list optional client capabilities in a top-level `capabilities` array (for example `{ "context": { "version": 1, ..., "capabilities": ["stream"] } }`); see [Streamed suggestions](#streamed-suggestions). A context whose `version` the server does not implement is rejected with `{ "error": "unsupported_context_version" }`. |
 | Audio | `{ "source": "mic"|"system", "chunk": "<base64>" }` | Chunk is mono, signed 16-bit little-endian PCM at 48 kHz. `chunk` may also be a byte array for non-browser clients. Decoded chunks are capped at 64 KiB (larger ones receive `{ "error": "Audio chunk too large" }`); WebSocket messages are capped at 128 KiB. |
 | Typed interviewer question | `{ "interviewer_question": "..." }` | Fallback when interviewer (system) audio is unavailable, e.g. Linux microphone-only mode. The text is trimmed and must be 1–2,000 characters, otherwise the frame is answered with `{ "error": "Invalid message" }`. The server treats it exactly like a final interviewer utterance: it is stored in history, echoed back as a `caller` transcript, and, if it is classified as a question, scheduled for generation (latest question wins). Ignored after `end`. |
+| Response action | `{ "action": { "type": "regenerate"|"shorten"|"expand"|"clarify", "generationId": "g7" } }` | Asks for a new generation from the current suggestion. `generationId` must be the ID of the latest generation for the current interviewer question (1–64 characters); no other fields are allowed. A malformed frame (unknown type, missing or oversized ID, extra fields) receives `{ "error": "Invalid message" }`; a well-formed one that cannot run receives `{ "error": "action_rejected", "reason": "..." }`. Ignored after `end`. See [Response actions](#response-actions). |
 | End | `{ "end": true }` | Stops the active transcription streams and any in-flight generation; later utterances and late replies are suppressed. For a resume-capable session it also purges the session immediately (no resume window). |
 
 The desktop client stops a session in this order: ask each audio worklet to flush its partial batch, wait (at most 250 ms) for that final audio chunk and send it, send `{ "end": true }`, then close the socket.
@@ -26,6 +27,7 @@ The desktop client stops a session in this order: ask each audio worklet to flus
 | Generation failed | `{ "generation": { "state": "failed" }, "ai_reply": "[Erreur du modèle]" }` (streaming clients: `generation` also carries `id`) | Terminal for the current question: the model returned no text, timed out, or the pipeline failed. Transcription keeps running. `ai_reply` is retained only for older clients; clients that understand `generation` must prefer the failure state over the reply text. Not sent for superseded generations. |
 | Suggestion | `{ "ai_reply": "...", "model"?: { "selected": "...", "actual": "..."|null } }` (streaming clients, for live generations: plus `"generation": { "id": "...", "state": "done" }`) | Introductory or response suggestion. The additive `model` object reports the model the server requested (`selected`) and the model the provider says served it (`actual`, `null` when the provider omits it). It is present when the provider reported model information; older clients can ignore it. The desktop client shows it under the suggestion as `Model: <actual or selected>`, naming both when they differ. |
 | Budget reached | `{ "error": "interview_budget_reached" }` | The interview's reported model cost reached `MAX_INTERVIEW_COST_USD`. Sent instead of generating, either for the introductory suggestion or for an interviewer question. Transcription continues; no further suggestions are generated for this interview. |
+| Action rejected | `{ "error": "action_rejected", "reason": "stale_generation"|"no_final_answer"|"rate_limited"|"question_limit_reached"|"disconnected" }` | Answer to a response action that did not run; no model call was made. See [Response actions](#response-actions). |
 | Unsupported context version | `{ "error": "unsupported_context_version" }` | The context declares a `version` other than `1` (legacy contexts omit `version`). The context is rejected: nothing is stored, no introductory suggestion is generated, and the previous session context, if any, stays in effect. |
 | Unsupported model | `{ "error": "unsupported_model" }` | The context's `settings.model` is not in the server allowlist. The context is rejected (no introductory suggestion) and the previous session context, if any, stays in effect. The desktop client tells the candidate to pick another model in Interview Settings. |
 | Other errors | `{ "error": "..." }` | `Invalid message` (including a context with a malformed `capabilities` list), `Unsupported audio chunk type`, or `Audio chunk too large`. The socket remains open. |
@@ -42,13 +44,13 @@ Streaming is opt-in. A client advertises it by listing `"stream"` in the top-lev
 
 The most recently accepted context decides. Sending a context without `"stream"` downgrades the session to the legacy messages. Each generation keeps the setting it started with, so a change applies from the next generation.
 
-For a streaming client, each live (interviewer-question) generation has an opaque string `id`, unique within the session. Clients must only compare it for equality. It produces, in order:
+For a streaming client, each live (interviewer-question or response-action) generation has an opaque string `id`, unique within the session. Clients must only compare it for equality. Every `generation` object that carries an `id` also carries an additive `kind`: `"answer"` for an interviewer question, or the response action that started it (`"regenerate"`, `"shorten"`, `"expand"`, `"clarify"`). Clients should ignore kinds they do not know. A generation produces, in order:
 
-1. `{ "generation": { "id": "g7", "state": "thinking" } }` — exactly once, before the model call.
-2. Zero or more `{ "generation": { "id": "g7", "state": "streaming" }, "delta": "..." }`. Deltas are raw candidate-facing text (whitespace included). They are coalesced on the server and sent at most every ~50 ms. Reasoning or other non-text model output is never streamed.
+1. `{ "generation": { "id": "g7", "kind": "answer", "state": "thinking" } }` — exactly once, before the model call.
+2. Zero or more `{ "generation": { "id": "g7", "kind": "answer", "state": "streaming" }, "delta": "..." }`. Deltas are raw candidate-facing text (whitespace included). They are coalesced on the server and sent at most every ~50 ms. Reasoning or other non-text model output is never streamed.
 3. Exactly one terminal message:
-   - `{ "ai_reply": "...", "model"?: {...}, "generation": { "id": "g7", "state": "done" } }`. `ai_reply` is the complete, trimmed suggestion and **replaces** the streamed text. Any pending delta is sent before it.
-   - or `{ "generation": { "id": "g7", "state": "failed" }, "ai_reply": "[Erreur du modèle]" }`. Discard any streamed text for that ID. A reply that is empty after trimming is a failure, never `done`.
+   - `{ "ai_reply": "...", "model"?: {...}, "generation": { "id": "g7", "kind": "answer", "state": "done" } }`. `ai_reply` is the complete, trimmed suggestion and **replaces** the streamed text. Any pending delta is sent before it.
+   - or `{ "generation": { "id": "g7", "kind": "answer", "state": "failed" }, "ai_reply": "[Erreur du modèle]" }`. Discard any streamed text for that ID. A reply that is empty after trimming is a failure, never `done`.
 
 Ordering guarantees:
 
@@ -59,7 +61,43 @@ Ordering guarantees:
 
 Not streamed: the introductory suggestion sent after a context, and `interview_budget_reached` errors. Both keep their existing shape, with no `generation` object.
 
-Compatibility: clients that do not advertise `"stream"` receive exactly the legacy messages (`{ "generation": { "state": "thinking" } }`, `{ "ai_reply": ... }`, and the failure shape, with no `id` and no deltas). Servers older than this feature ignore the unknown `capabilities` key and send the legacy messages, which streaming clients must continue to handle.
+Compatibility: clients that do not advertise `"stream"` (or `"actions"`, below) receive exactly the legacy messages (`{ "generation": { "state": "thinking" } }`, `{ "ai_reply": ... }`, and the failure shape, with no `id`, no `kind`, and no deltas). Servers older than this feature ignore the unknown `capabilities` key and send the legacy messages, which streaming clients must continue to handle.
+
+## Response actions
+
+A candidate can ask for a different take on the current suggestion with `{ "action": { "type": ..., "generationId": ... } }`:
+
+| `type` | Result |
+| --- | --- |
+| `regenerate` | A fresh answer to the same interviewer question, from the same selected evidence. |
+| `shorten` | The latest final answer for the question rewritten as at most three speakable sentences, adding nothing new. |
+| `expand` | The latest final answer for the question expanded into evidence-grounded STAR detail (Situation, Task, Action, Result). Missing evidence is stated, not invented. |
+| `clarify` | One to three short clarifying questions the candidate could ask the interviewer, each with what it would disambiguate. It does not answer the question, and it does not replace the answer that later `shorten`/`expand` actions use. |
+
+An action targets a generation ID, so a client needs IDs: streaming clients have them; a non-streaming client advertises `"actions"` in the context `capabilities` to receive `id` and `kind` on its `thinking`, final `ai_reply`, and `failed` messages (still without deltas). Without either capability the generation messages keep their legacy shapes.
+
+An accepted action runs through the latest-question-wins scheduler as a **new generation** with a new `id` and the action's `kind`. It supersedes (aborts) any generation in flight, which then sends nothing further; a newer interviewer question supersedes an action in flight the same way. Streaming clients receive the usual `thinking` → `streaming`* → `done`/`failed` sequence; non-streaming clients receive `thinking` and the final `ai_reply` (or failure). Example, after `g7` completed:
+
+```json
+{ "action": { "type": "shorten", "generationId": "g7" } }
+{ "generation": { "id": "g8", "kind": "shorten", "state": "thinking" } }
+{ "generation": { "id": "g8", "kind": "shorten", "state": "streaming" }, "delta": "I led the billing migration " }
+{ "ai_reply": "I led the billing migration with zero data loss.", "generation": { "id": "g8", "kind": "shorten", "state": "done" } }
+```
+
+Action outputs are not added to the conversation history sent with later questions; the interviewer question and the previous answer reach the model only as quoted data, never as instructions.
+
+An action that cannot run is answered with `{ "error": "action_rejected", "reason": ... }` and makes no model call:
+
+| `reason` | When |
+| --- | --- |
+| `stale_generation` | `generationId` is not the latest generation of the current interviewer question (an older generation, an unknown ID, or a newer question has arrived). |
+| `no_final_answer` | `shorten` or `expand` before the question has a completed answer (for example while it is still generating, or after it failed). `regenerate` and `clarify` do not need one. |
+| `rate_limited` | Less than 1.5 s since the previous accepted action. |
+| `question_limit_reached` | Five actions were already accepted for this interviewer question. The count resets with the next question. |
+| `disconnected` | Resume-capable sessions only: the action was still queued (not started) when the socket dropped. It is never run later. |
+
+Actions are charged to the interview budget like any generation. When the budget is spent, an action is answered with `{ "error": "interview_budget_reached" }` instead.
 
 ## Resumable sessions
 
@@ -78,7 +116,7 @@ When the socket of a resume-capable session closes without `end`, the server:
 
 - keeps the context, history, model choice, and budget;
 - stops the Deepgram streams (they reopen on the next audio chunk after a resume);
-- aborts the in-flight introductory suggestion (it is never sent) and the in-flight live generation, drops any queued question, and never re-runs them, so a resume never causes a duplicate paid model request. An interrupted live generation is reported, through the replay buffer, as `{ "generation": { "id"?: "...", "state": "failed", "reason": "disconnected" }, "ai_reply": "[Erreur du modèle]" }`; `id` is present for streaming clients, as in the normal failure shape;
+- aborts the in-flight introductory suggestion (it is never sent) and the in-flight live generation, drops any queued question, and never re-runs them, so a resume never causes a duplicate paid model request. An interrupted live generation (including one started by a response action) is reported, through the replay buffer, as `{ "generation": { "id"?: "...", "kind"?: "...", "state": "failed", "reason": "disconnected" }, "ai_reply": "[Erreur du modèle]" }`; `id` and `kind` are present for streaming clients, as in the normal failure shape. A response action still queued is reported as `{ "error": "action_rejected", "reason": "disconnected" }`. Neither is re-run;
 - starts the resume window, `RESUME_WINDOW_MS` (default 120,000 ms). When it elapses the session is purged.
 
 If a `resume` arrives for a session that is still attached to another open socket (for example a half-open connection the server has not detected yet), the newer connection takes the session over and the older socket is closed with code `4002` and reason `session_resumed_elsewhere`. Frames from the old socket are ignored after that.
@@ -100,6 +138,7 @@ Clients must de-duplicate by `seq`: ignore any sequenced message whose `seq` is 
 ### Guarantees and limits
 
 - No duplicate paid requests: a generation interrupted by a disconnect is reported failed and never re-run. The candidate can ask again.
+- Response actions are sequenced like every other message: `action_rejected` errors and an action's final or failed suggestion are replayed, its `thinking` and deltas are not. A suggestion completed before the disconnect can still be the target of an action after a resume.
 - Audio sent while disconnected is lost. The server does not fabricate or interpolate it and reports it with `audio_gap`. The desktop client drops audio while reconnecting; it never queues audio for a later socket.
 - Session state and the replay buffer are kept in the memory of one backend process. A resume must reach the same instance, and a server restart loses every resumable session (clients then get `resume_expired`). A multi-instance deployment needs a shared replay store (for example Redis) and sticky routing first.
 - This is the `/ws` protocol. The planned `/ws/v2` envelope (event IDs, acknowledgements, per-source audio sequence numbers) is not implemented yet.
