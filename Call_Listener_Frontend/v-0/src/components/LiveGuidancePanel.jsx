@@ -1,5 +1,80 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import SuggestionText from "./SuggestionText.jsx";
+
+// What the shown suggestion is: a normal answer or the result of an action.
+export const SUGGESTION_KIND_LABELS = Object.freeze({
+  answer: "Answer",
+  regenerate: "Regenerated answer",
+  shorten: "Shorter answer",
+  expand: "Detailed answer (STAR)",
+  clarify: "Clarifying questions to ask",
+});
+
+// Candidate response actions on the current final suggestion. `code` is the
+// physical key, so the shortcut works whatever character Alt+key would type.
+export const RESPONSE_ACTIONS = Object.freeze([
+  { type: "regenerate", label: "Regenerate", shortcut: "Alt+R", code: "KeyR" },
+  { type: "shorten", label: "Shorter", shortcut: "Alt+S", code: "KeyS" },
+  { type: "expand", label: "More detail", shortcut: "Alt+E", code: "KeyE" },
+  { type: "clarify", label: "Clarify", shortcut: "Alt+C", code: "KeyC" },
+]);
+
+const EDITABLE_TAGS = new Set(["INPUT", "TEXTAREA", "SELECT"]);
+
+function isEditableTarget(target) {
+  if (!target || typeof target !== "object") return false;
+  return target.isContentEditable === true || EDITABLE_TAGS.has(target.tagName);
+}
+
+// The response action an Alt+key press asks for, or null. Shortcuts never
+// fire while the candidate is typing (for example a typed question).
+export function shortcutAction(event) {
+  if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null;
+  if (isEditableTarget(event.target)) return null;
+  return RESPONSE_ACTIONS.find((action) => action.code === event.code) ?? null;
+}
+
+function ResponseActions({ enabled, pendingAction, actionError, onResponseAction }) {
+  useEffect(() => {
+    function onKeyDown(event) {
+      const action = shortcutAction(event);
+      if (!action) return;
+      event.preventDefault();
+      if (enabled && !event.repeat) onResponseAction(action.type);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [enabled, onResponseAction]);
+
+  return (
+    <div className="mt-3" aria-busy={pendingAction ? true : undefined}>
+      <div aria-label="Response actions" className="flex flex-wrap gap-2" role="group">
+        {RESPONSE_ACTIONS.map((action) => (
+          <button
+            aria-keyshortcuts={action.shortcut}
+            className="btn btn-ghost h-8 px-2 text-xs"
+            disabled={!enabled}
+            key={action.type}
+            onClick={() => onResponseAction(action.type)}
+            title={`${action.label} (${action.shortcut})`}
+            type="button"
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
+      <p className="mt-1 text-xs text-[var(--text-2)]">
+        Shortcuts: <kbd>Alt+R</kbd> regenerate, <kbd>Alt+S</kbd> shorter,{" "}
+        <kbd>Alt+E</kbd> more detail, <kbd>Alt+C</kbd> clarify (not while typing).
+      </p>
+      {actionError && (
+        <p className="mt-1 text-xs text-[var(--danger)]" role="status">
+          {actionError}
+        </p>
+      )}
+    </div>
+  );
+}
 
 // "Model: <actual || selected>", naming the requested model too when the
 // provider reports that a different one served the request.
@@ -19,9 +94,17 @@ export default function LiveGuidancePanel({
   isStreaming = false,
   model = null,
   alerts = [],
+  generationKind = null,
+  actionsEnabled = false,
+  pendingAction = null,
+  actionError = "",
+  onResponseAction,
 }) {
   const [typedQuestion, setTypedQuestion] = useState("");
   const modelLabel = formatModelLabel(model);
+  const kindLabel = Object.hasOwn(SUGGESTION_KIND_LABELS, generationKind ?? "")
+    ? SUGGESTION_KIND_LABELS[generationKind]
+    : "";
 
   function submitTypedQuestion(event) {
     event.preventDefault();
@@ -51,6 +134,7 @@ export default function LiveGuidancePanel({
       </section>
       <section>
         <h2 className="text-sm font-semibold">Suggested answer</h2>
+        {kindLabel && <p className="badge mt-1">{kindLabel}</p>}
         <div className="prose prose-sm max-w-none mt-1" aria-busy={isStreaming || undefined}>
           {isThinking ? (
             <p className="text-[var(--text-2)]" role="status">
@@ -69,6 +153,14 @@ export default function LiveGuidancePanel({
         )}
         {!isThinking && !isStreaming && modelLabel && (
           <p className="mt-1 text-xs text-[var(--text-2)]">{modelLabel}</p>
+        )}
+        {onResponseAction && (
+          <ResponseActions
+            actionError={actionError}
+            enabled={actionsEnabled}
+            onResponseAction={onResponseAction}
+            pendingAction={pendingAction}
+          />
         )}
       </section>
       <section>
