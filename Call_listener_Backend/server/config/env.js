@@ -56,6 +56,9 @@ const CONFIG = {
   // Device deny-list: deny (true) or allow (false, default) when Redis is
   // unreachable, and how often open sockets are re-checked.
   REVOCATION_FAIL_CLOSED: readBooleanFlag("REVOCATION_FAIL_CLOSED", false),
+  // When true, /auth/token refuses installations that present no enrolled
+  // secret (older desktop builds). Turn on once every pilot client enrolls.
+  ENROLLMENT_REQUIRED: readBooleanFlag("ENROLLMENT_REQUIRED", false),
   REVOCATION_SWEEP_MS: Number(process.env.REVOCATION_SWEEP_MS || 60_000),
   MAX_DISCONNECTED_SESSIONS_PER_OWNER: Number(process.env.MAX_DISCONNECTED_SESSIONS_PER_OWNER || 3),
   OPENROUTER_INPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_INPUT_USD_PER_MILLION_TOKENS || 0.2),

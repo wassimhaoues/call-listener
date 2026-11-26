@@ -28,21 +28,28 @@ function parseWsTicket(raw) {
   }
 }
 
+// Installation-identity answers with their HTTP status: the server disabled
+// this installation, or it could not prove its enrolled secret.
+const IDENTITY_ERRORS = Object.freeze({
+  device_revoked: 403,
+  device_secret_invalid: 401,
+  enrollment_required: 403,
+});
+
 /**
- * A 403 whose JSON body names `device_revoked`: the server disabled this
- * installation. The error carries `code` for services/authFailure.js and the
- * code in its message, which is all that crosses IPC to the renderer.
+ * An answer whose JSON body names one of IDENTITY_ERRORS with its status. The
+ * error carries `code` for services/authFailure.js and the code in its
+ * message, which is all that crosses IPC to the renderer.
  */
 function revokedError(statusCode, raw) {
-  if (statusCode !== 403) return null;
   let code;
   try {
     code = JSON.parse(raw)?.error;
   } catch {
     return null;
   }
-  if (code !== "device_revoked") return null;
-  return Object.assign(new Error("device_revoked"), { code: "device_revoked", statusCode });
+  if (!Object.hasOwn(IDENTITY_ERRORS, code) || IDENTITY_ERRORS[code] !== statusCode) return null;
+  return Object.assign(new Error(code), { code, statusCode });
 }
 
 /** Timeout error classified as server_unreachable by services/authFailure.js. */
@@ -94,6 +101,8 @@ class AuthManager {
     if (!this.deviceId || typeof this.deviceId !== "string") {
       throw new TypeError("deviceId is required");
     }
+    // Optional enrollment secret (services/deviceCredentials.js); main-process only.
+    this.deviceSecret = typeof opts.deviceSecret === "string" ? opts.deviceSecret : undefined;
 
     this.requestTimeoutMs = opts.requestTimeoutMs || AUTH_REQUEST_TIMEOUT_MS;
 
@@ -102,7 +111,9 @@ class AuthManager {
   }
 
   _postToken(deviceId) {
-    const payload = JSON.stringify({ app_id: this.appId, device_id: deviceId });
+    const body = { app_id: this.appId, device_id: deviceId };
+    if (this.deviceSecret) body.device_secret = this.deviceSecret;
+    const payload = JSON.stringify(body);
     return new Promise((outerResolve, outerReject) => {
       let resolve = outerResolve;
       let reject = outerReject;

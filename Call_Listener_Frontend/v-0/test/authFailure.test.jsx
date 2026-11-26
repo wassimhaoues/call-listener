@@ -117,3 +117,7 @@ describe("AuthError page", () => {
     expect(authErrorCopy("revoked").title).toBe("This installation has been disabled");
   });
 });
+
+it("explains an installation whose sign-in key was not accepted", () => {
+  expect(authErrorCopy("credential").title).toBe("This installation could not be verified");
+});

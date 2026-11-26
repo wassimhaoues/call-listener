@@ -10,6 +10,8 @@ const AUTH_FAILURE = Object.freeze({
   HTTP: "http",
   // The server disabled this installation (403 device_revoked).
   REVOKED: "revoked",
+  // The installation could not prove its enrolled secret.
+  CREDENTIAL: "credential",
 });
 
 // Node/OpenSSL error codes raised when the TLS handshake or certificate check
@@ -20,11 +22,14 @@ const TLS_ERROR_CODE =
 /**
  * @param {unknown} error  The error thrown by AuthManager.ensure().
  * @param {{ online?: boolean }} network  `online` is Electron's net.isOnline().
- * @returns {"offline"|"server_unreachable"|"tls"|"http"|"revoked"}
+ * @returns {"offline"|"server_unreachable"|"tls"|"http"|"revoked"|"credential"}
  */
 function classifyAuthFailure(error, { online = true } = {}) {
   if (!online) return AUTH_FAILURE.OFFLINE;
   if (error?.code === "device_revoked") return AUTH_FAILURE.REVOKED;
+  if (error?.code === "device_secret_invalid" || error?.code === "enrollment_required") {
+    return AUTH_FAILURE.CREDENTIAL;
+  }
   if (Number.isInteger(error?.statusCode)) return AUTH_FAILURE.HTTP;
   const code = typeof error?.code === "string" ? error.code : "";
   if (TLS_ERROR_CODE.test(code)) return AUTH_FAILURE.TLS;

@@ -17,6 +17,7 @@ const {
   nativeImage,
   net,
   Notification,
+  safeStorage,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 
@@ -63,7 +64,7 @@ const { createProgressWindow } = require("./services/progressWindow");
 const { getPlatformCapabilities } = require("./services/platformCapabilities");
 const { createPlatformAudio } = require("./services/platformAudio");
 const { buildDiagnostics } = require("./services/diagnostics");
-const { getOrCreateInstallationId } = require("./services/installationId");
+const { getOrCreateDeviceCredentials } = require("./services/deviceCredentials");
 // ---- Globals (main process) --------------------------------------------------
 let mainWindow = null;
 let tray = null;
@@ -495,7 +496,11 @@ app.whenReady().then(async () => {
     prodWsOrigins: [`https://${BACKEND_HOST}`, `wss://${BACKEND_HOST}`],
   });
   const capabilities = getPlatformCapabilities({ platform: process.platform });
-  const installationId = getOrCreateInstallationId(userDataDir);
+  // Installation ID plus its enrollment secret (kept in the OS credential store).
+  const credentials = getOrCreateDeviceCredentials({ userDataDir, safeStorage });
+  if (credentials.storage !== "os") {
+    console.warn("[credentials] OS credential storage unavailable; signing in without an enrollment secret");
+  }
   const authMgr = new AuthManager({
     requestClient: BACKEND_PROTOCOL === "https" ? https : http,
     appId: AUTH_APP_ID,
@@ -505,7 +510,8 @@ app.whenReady().then(async () => {
     wsProtocol: WS_PROTOCOL,
     wsPort: WS_PORT,
     electronSession: session.defaultSession,
-    deviceId: installationId,
+    deviceId: credentials.deviceId,
+    deviceSecret: credentials.deviceSecret,
   });
 
   const platformAudio = createPlatformAudio({

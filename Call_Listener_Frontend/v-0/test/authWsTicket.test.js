@@ -198,3 +198,41 @@ describe("revoked installations", () => {
     expect(classifyAuthFailure(error)).toBe(AUTH_FAILURE.HTTP);
   });
 });
+
+describe("installation enrollment", () => {
+  const { classifyAuthFailure, AUTH_FAILURE } = require("../services/authFailure.js");
+
+  it("sends the enrollment secret with the token request, never in a URL", async () => {
+    const requestClient = makeScriptedRequestClient([
+      { statusCode: 200, body: { token: "t", expires_in: 900 } },
+      ticketAnswer(),
+    ]);
+    const auth = makeAuth(requestClient, { deviceSecret: "A".repeat(43) });
+    auth.token = null;
+    const url = await auth.makeSignedWsUrl();
+    expect(JSON.parse(requestClient.requests[0].written)).toMatchObject({ device_secret: "A".repeat(43) });
+    expect(url).not.toContain("AAAA");
+    expect(requestClient.requests.every((req) => !String(req.options.path).includes("AAAA"))).toBe(true);
+    clearTimeout(auth.refreshTimer);
+  });
+
+  it("omits the field for a client without a secret", async () => {
+    const requestClient = makeScriptedRequestClient([{ statusCode: 200, body: { token: "t", expires_in: 900 } }]);
+    const auth = makeAuth(requestClient);
+    auth.token = null;
+    await auth.ensure();
+    expect(JSON.parse(requestClient.requests[0].written)).not.toHaveProperty("device_secret");
+    clearTimeout(auth.refreshTimer);
+  });
+
+  it.each([
+    [401, "device_secret_invalid"],
+    [403, "enrollment_required"],
+  ])("classifies %i %s as a credential failure", async (statusCode, code) => {
+    const auth = makeAuth(makeScriptedRequestClient([{ statusCode, body: { error: code } }]));
+    auth.token = null;
+    const error = await auth.ensure().catch((caught) => caught);
+    expect(error).toMatchObject({ code, message: code });
+    expect(classifyAuthFailure(error)).toBe(AUTH_FAILURE.CREDENTIAL);
+  });
+});

@@ -5,6 +5,7 @@
  *   npm run admin:revocation -- revoke <device-id> [--reason <code>]
  *   npm run admin:revocation -- restore <device-id>
  *   npm run admin:revocation -- check <device-id>
+ *   npm run admin:revocation -- reset-enrollment <device-id>
  *
  * Connects to REDIS_URL (from the environment or a local .env). Output names a
  * device only by its short SHA-256 fingerprint and never prints REDIS_URL or
@@ -21,11 +22,12 @@ import {
   DEVICE_ID_MAX_LENGTH,
   DEVICE_ID_MIN_LENGTH,
 } from "../../server/services/auth/deviceRevocation.js";
+import { createDeviceEnrollment } from "../../server/services/auth/deviceEnrollment.js";
 
 export const EXIT_OK = 0;
 export const EXIT_FAILURE = 1;
 export const EXIT_USAGE = 2;
-const COMMANDS = new Set(["revoke", "restore", "check"]);
+const COMMANDS = new Set(["revoke", "restore", "check", "reset-enrollment"]);
 const CONNECT_TIMEOUT_MS = 5_000;
 
 export const USAGE = [
@@ -33,6 +35,7 @@ export const USAGE = [
   "  npm run admin:revocation -- revoke <device-id> [--reason <code>]",
   "  npm run admin:revocation -- restore <device-id>",
   "  npm run admin:revocation -- check <device-id>",
+  "  npm run admin:revocation -- reset-enrollment <device-id>",
   "",
   "The reason is an operator code (letters, digits, spaces and _ . : # / -, at most 120",
   "characters), for example a ticket number. Never put personal data in it.",
@@ -56,7 +59,7 @@ function readReason(options) {
 /** Validate CLI arguments; throws UsageError. */
 export function parseArgs(argv) {
   const [command, deviceId, ...options] = argv;
-  if (!COMMANDS.has(command)) throw new UsageError("expected a command: revoke, restore or check");
+  if (!COMMANDS.has(command)) throw new UsageError("expected a command: revoke, restore, check or reset-enrollment");
   if (typeof deviceId !== "string" || deviceId.startsWith("-")) throw new UsageError("missing <device-id>");
   if (!isDeviceId(deviceId) || /\s/.test(deviceId)) {
     throw new UsageError(
@@ -75,8 +78,15 @@ export function parseArgs(argv) {
   }
 }
 
-async function execute({ command, deviceId, reason }, revocation, write) {
+async function execute({ command, deviceId, reason }, { revocation, enrollment }, write) {
   const fingerprint = deviceFingerprint(deviceId);
+  if (command === "reset-enrollment") {
+    // For an installation whose stored secret was lost (for example user data
+    // copied to another computer): it enrolls again on its next sign-in.
+    const existed = await enrollment.reset(deviceId);
+    write(existed ? `reset enrollment of device ${fingerprint}; its next sign-in enrolls a new secret` : `device ${fingerprint} was not enrolled`);
+    return;
+  }
   if (command === "revoke") {
     const record = await revocation.revoke(deviceId, { reason });
     write(`revoked device ${fingerprint} (reason: ${record.reason}, at ${record.revokedAt})`);
@@ -115,7 +125,7 @@ export async function runCli(argv, { openRevocation, stdout, stderr }) {
   let session;
   try {
     session = await openRevocation();
-    await execute(parsed, session.revocation, write);
+    await execute(parsed, session, write);
     return EXIT_OK;
   } catch (error) {
     // Only an error code: messages can embed connection details.
@@ -152,6 +162,7 @@ export function openRedisRevocation(redisUrl) {
     }
     return {
       revocation: createDeviceRevocation({ redisClient: redis }),
+      enrollment: createDeviceEnrollment({ redisClient: redis }),
       close: async () => {
         try {
           await redis.quit();

@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import { createFixedWindowLimiter } from "./core/rateLimit.js";
 import { createWsTicketStore, DEFAULT_WS_TICKET_TTL_SECONDS } from "./services/auth/wsTicketStore.js";
 import { createDeviceRevocation, isDeviceId } from "./services/auth/deviceRevocation.js";
+import { createDeviceEnrollment, ENROLLMENT_ERROR } from "./services/auth/deviceEnrollment.js";
 
 /**
  * Create the HTTP API with explicit runtime dependencies.
@@ -20,6 +21,7 @@ export function createApp({
   preparationBrief,
   wsTickets,
   deviceRevocation,
+  deviceEnrollment,
   log,
 } = {}) {
   if (!redisClient) throw new TypeError("redisClient is required");
@@ -33,6 +35,14 @@ export function createApp({
   const revocation =
     deviceRevocation ??
     createDeviceRevocation({ redisClient, failClosed: config.REVOCATION_FAIL_CLOSED === true, log });
+  const enrollment =
+    deviceEnrollment ??
+    createDeviceEnrollment({ redisClient, required: config.ENROLLMENT_REQUIRED === true, log });
+  const ENROLLMENT_STATUS = {
+    [ENROLLMENT_ERROR.INVALID]: 401,
+    [ENROLLMENT_ERROR.REQUIRED]: 403,
+    [ENROLLMENT_ERROR.UNAVAILABLE]: 503,
+  };
   // Answers 403 device_revoked (or 503 when the deny-list is unreachable in
   // fail-closed mode) and resolves true when the request must stop here.
   async function denyIfRevoked(deviceId, res) {
@@ -82,7 +92,7 @@ export function createApp({
   });
   app.post("/auth/token", authTokenLimiter, async (req, res) => {
     try {
-      const { app_id, device_id } = req.body || {};
+      const { app_id, device_id, device_secret } = req.body || {};
       if (app_id !== config.APP_ID) {
         return res.status(401).json({ error: "invalid app" });
       }
@@ -90,6 +100,12 @@ export function createApp({
         return res.status(400).json({ error: "invalid device_id" });
       }
       if (await denyIfRevoked(device_id, res)) return undefined;
+      // The installation must prove it holds its enrolled secret (or enroll
+      // now); see services/auth/deviceEnrollment.js.
+      const enrolled = await enrollment.check(device_id, device_secret);
+      if (!enrolled.allowed) {
+        return res.status(ENROLLMENT_STATUS[enrolled.error] ?? 503).json({ error: enrolled.error });
+      }
 
       const now = Math.floor(Date.now() / 1000);
       const payload = {

@@ -146,3 +146,18 @@ test("the script exits non-zero and never prints REDIS_URL or its password", asy
   assert.equal(missingUrl.code, EXIT_FAILURE);
   assert.match(missingUrl.stderr, /REDIS_URL_MISSING/);
 });
+
+test("reset-enrollment forgets an enrolled secret and prints only the fingerprint", async () => {
+  const { createDeviceEnrollment } = await import("../server/services/auth/deviceEnrollment.js");
+  const redisClient = createMemoryRedis();
+  const enrollment = createDeviceEnrollment({ redisClient });
+  await enrollment.check(DEVICE, randomBytes(32).toString("base64url"));
+  const stdout = sink();
+  const stderr = sink();
+  const openRevocation = async () => ({ revocation: createDeviceRevocation({ redisClient }), enrollment, close: async () => {} });
+  assert.equal(await runCli(["reset-enrollment", DEVICE], { openRevocation, stdout, stderr }), EXIT_OK);
+  assert.match(stdout.text(), new RegExp(`reset enrollment of device ${deviceFingerprint(DEVICE)}`));
+  assert.ok(!stdout.text().includes(DEVICE));
+  assert.equal(await enrollment.isEnrolled(DEVICE), false);
+  assert.equal(await runCli(["reset-enrollment", DEVICE, "--reason", "x"], { openRevocation, stdout, stderr }), EXIT_USAGE);
+});

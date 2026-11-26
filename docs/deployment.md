@@ -41,6 +41,16 @@ The reason is an operator code (at most 120 characters of letters, digits, space
 
 After `revoke`, new tokens, tickets, HTTP requests and WebSocket connections from that installation are refused immediately (`403`/`4003 device_revoked`), and its open sockets close within `REVOCATION_SWEEP_MS` (default one minute) on every backend instance. `restore` re-enables it at once. Limits: until installations are enrolled with revocable credentials, a user can reset the desktop's installation ID and come back as a new device; `REVOCATION_FAIL_CLOSED` (default `false`) decides whether a Redis outage lets requests through (logged) or refuses all new authentication (see [Device revocation](backend.md#device-revocation)). Redis persistence (`redis-data`) keeps the deny-list across restarts; restoring Redis from an old backup can drop recent revocations.
 
+## Installation enrollment
+
+Desktop builds that include enrollment send a per-installation secret on sign-in, and the backend binds it to the installation ID on first use ([details](backend.md#installation-enrollment)). Roll it out in this order:
+
+1. Deploy the backend with `ENROLLMENT_REQUIRED=false` (the default). Old and new desktops both sign in.
+2. Ship the desktop build. Each installation enrolls on its next sign-in, keeping its installation ID.
+3. When every pilot installation runs the new build, set `ENROLLMENT_REQUIRED=true` so an ID without its secret is refused.
+
+When a candidate's stored secret is lost (for example the app data was copied to another computer, or the OS key store was reset), the desktop starts over as a new installation by itself. If an installation still reports "could not be verified", run `npm run admin:revocation -- reset-enrollment <device-id>`. Its next sign-in enrolls a new secret. The device ID lands in your shell history, as for revocation.
+
 ## Desktop release builds
 
 `.github/workflows/release.yml` builds desktop artifacts when a `vX.Y.Z` tag is pushed (or via manual dispatch with an existing tag):
