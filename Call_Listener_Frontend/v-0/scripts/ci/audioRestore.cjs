@@ -78,15 +78,25 @@ function readListenState() {
   }
 }
 
+const SCENARIO_TIMEOUT_MS = 60_000;
+
 async function scenario(name, fn) {
   const started = Date.now();
+  let timer;
+  // Keeps the event loop alive and turns a hung step into a failure instead
+  // of a silent exit with code 0.
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${SCENARIO_TIMEOUT_MS} ms`)), SCENARIO_TIMEOUT_MS);
+  });
   try {
-    await fn();
+    await Promise.race([fn(), timeout]);
     results.push({ name, ok: true, ms: Date.now() - started });
     console.log(`PASS ${name}`);
   } catch (error) {
     results.push({ name, ok: false, ms: Date.now() - started, error: String(error?.stack || error) });
     console.error(`FAIL ${name}\n${error?.stack || error}`);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -234,6 +244,14 @@ if (process.env.CRASH_CHILD === "1") {
     process.exit(2);
   });
 } else {
+  // Fail closed: only the end of main() reports success. If the event loop
+  // drains early (an unsettled promise), the run must not pass.
+  process.exitCode = 3;
+  process.on("beforeExit", () => {
+    if (process.exitCode === 3) {
+      console.error(`FAIL audio scenarios stopped early after ${results.length} scenario(s)`);
+    }
+  });
   main().catch((error) => {
     console.error(error);
     process.exit(1);
