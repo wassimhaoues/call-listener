@@ -1,15 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readdir, readFile, realpath, rm, symlink } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { EvalConfigError, resolveProviderConfig } from "../scripts/eval/lib/costGuard.js";
 import { FixtureError, loadFixtures, QUESTION_TYPES, validateCase, validateSuite } from "../scripts/eval/lib/fixtures.js";
 import { checkCancellation, planJobs, runEvaluation } from "../scripts/eval/lib/harness.js";
 import { createFakeReplyGenerator, fakeAnswer, parsePromptEvidence } from "../scripts/eval/lib/providers.js";
-import { assertSafeFileName, BACKEND_ROOT, resolveSafeDirectory, safeJoin, UnsafePathError } from "../scripts/eval/lib/safePaths.js";
+import { reportBaseName } from "../scripts/eval/lib/report.js";
+import { assertSafeFileName, BACKEND_ROOT, safeJoin, UnsafePathError } from "../scripts/eval/lib/safePaths.js";
 import { buildChainPrompt, createChainVariant, createGraphVariant } from "../scripts/eval/lib/variants.js";
-import { DEFAULT_FIXTURES_DIR, main } from "../scripts/eval/runEval.js";
+import { DEFAULT_FIXTURES_DIR, DEFAULT_OUT_DIR, main } from "../scripts/eval/runEval.js";
 
 const FAKE_KEY = "sk-or-test-not-a-real-key";
 const LIVE_ENV = Object.freeze({ OPENROUTER_API_KEY: FAKE_KEY });
@@ -141,8 +142,8 @@ test("the CLI refuses --live without --max-usd before building a client", async 
   const out = await tempDir(t);
   const { FakeChatOpenRouter, record } = recordingChatClass();
   const stderr = capture();
-  const code = await main(["--provider", "openrouter", "--live", "--out", out], {
-    env: LIVE_ENV, write: () => {}, writeError: stderr.write, ChatOpenRouterClass: FakeChatOpenRouter,
+  const code = await main(["--provider", "openrouter", "--live"], {
+    env: LIVE_ENV, write: () => {}, writeError: stderr.write, ChatOpenRouterClass: FakeChatOpenRouter, outDir: out,
   });
   assert.equal(code, 2);
   assert.match(stderr.text(), /--live requires --max-usd/);
@@ -155,8 +156,8 @@ test("the CLI stops before any request when the estimate exceeds the cap", async
   const { FakeChatOpenRouter, record } = recordingChatClass();
   const stdout = capture();
   const stderr = capture();
-  const code = await main(["--provider", "openrouter", "--live", "--max-usd", "0.0001", "--out", out], {
-    env: LIVE_ENV, write: stdout.write, writeError: stderr.write, ChatOpenRouterClass: FakeChatOpenRouter,
+  const code = await main(["--provider", "openrouter", "--live", "--max-usd", "0.0001"], {
+    env: LIVE_ENV, write: stdout.write, writeError: stderr.write, ChatOpenRouterClass: FakeChatOpenRouter, outDir: out,
   });
   assert.equal(code, 2);
   assert.match(stdout.text(), /worst-case estimate \$\d+\.\d+ \(cap \$0\.0001\)/);
@@ -188,8 +189,8 @@ test("a capped live run through the real adapter never writes the key", async (t
   const out = await tempDir(t);
   const { FakeChatOpenRouter, record } = recordingChatClass();
   const stdout = capture();
-  const code = await main(["--provider", "openrouter", "--live", "--max-usd", "1", "--variant", "chain", "--out", out], {
-    env: LIVE_ENV, write: stdout.write, writeError: () => {}, ChatOpenRouterClass: FakeChatOpenRouter,
+  const code = await main(["--provider", "openrouter", "--live", "--max-usd", "1", "--variant", "chain"], {
+    env: LIVE_ENV, write: stdout.write, writeError: () => {}, ChatOpenRouterClass: FakeChatOpenRouter, outDir: out,
   });
   assert.equal(code, 0);
   assert.equal(record.calls, cases.flatMap((caseDef) => caseDef.questions).length);
@@ -207,8 +208,9 @@ test("a full fake-provider run writes a JSON and Markdown comparison report", as
   const out = await tempDir(t);
   const stdout = capture();
   let tick = 0;
-  const code = await main(["--out", out], {
+  const code = await main([], {
     env: {},
+    outDir: out,
     write: stdout.write,
     now: () => {
       tick += 5;
@@ -284,29 +286,22 @@ test("the cancellation check fails a variant that never reaches the provider", a
   assert.equal(failing.passed, false);
 });
 
-test("path options must stay inside the backend root or the OS temp directory", async (t) => {
-  const outside = path.resolve(BACKEND_ROOT, "..", "eval-outside");
-  for (const args of [["--out", outside], ["--fixtures", outside], ["--out", path.parse(BACKEND_ROOT).root]]) {
+test("the CLI accepts no filesystem path options and uses fixed locations", async () => {
+  for (const args of [["--out", os.tmpdir()], ["--fixtures", os.tmpdir()], ["extra-positional"]]) {
     const stderr = capture();
     const code = await main(args, { env: {}, write: () => {}, writeError: stderr.write });
     assert.equal(code, 2, args.join(" "));
-    assert.match(stderr.text(), /must be inside/);
+    assert.match(stderr.text(), /^eval: /);
   }
-  await assert.rejects(resolveSafeDirectory(path.join(BACKEND_ROOT, "..", ".."), "--out"), UnsafePathError);
-  const inside = await tempDir(t);
-  assert.equal(await resolveSafeDirectory(inside, "--out"), await realpath(inside));
+  assert.equal(DEFAULT_FIXTURES_DIR, path.join(BACKEND_ROOT, "test", "fixtures", "eval"));
+  assert.equal(DEFAULT_OUT_DIR, path.resolve(BACKEND_ROOT, "..", "eval-results"));
 });
 
-test("a symlink inside an allowed root cannot redirect reads or writes outside it", async (t) => {
-  const dir = await tempDir(t);
-  const link = path.join(dir, "escape");
-  try {
-    await symlink(path.parse(BACKEND_ROOT).root, link, "dir");
-  } catch {
-    t.skip("symlinks are not available on this platform");
-    return;
-  }
-  await assert.rejects(resolveSafeDirectory(link, "--out"), /resolves outside/);
+test("report file names come only from the clock and a fixed provider tag", () => {
+  const generatedAt = "2026-01-02T03:04:05.678Z";
+  assert.equal(reportBaseName({ generatedAt, live: false, provider: "../../x" }), "2026-01-02T03-04-05Z-fake");
+  assert.equal(reportBaseName({ generatedAt, live: true, provider: "anything" }), "2026-01-02T03-04-05Z-openrouter");
+  assert.throws(() => reportBaseName({ generatedAt: "not a date", live: false }), RangeError);
 });
 
 test("report and fixture file names are checked against a safe pattern", () => {

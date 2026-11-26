@@ -14,10 +14,10 @@ The checks are proxies. They do not replace the human usefulness review in [vali
 | `scripts/eval/lib/metrics.js` | Metric functions and per-variant aggregation. |
 | `scripts/eval/lib/costGuard.js` | Provider configuration, cost estimate, and spend guard. |
 | `scripts/eval/lib/fixtures.js` | Fixture schema and suite validation. |
-| `scripts/eval/lib/safePaths.js` | Path checks for `--fixtures`, `--out`, and the report and fixture file names. |
+| `scripts/eval/lib/safePaths.js` | The backend root constant and the safe file-name checks. |
 | `scripts/eval/lib/harness.js`, `report.js` | The run loop, Phase 4 gate mapping, and JSON/Markdown output. |
 | `test/fixtures/eval/*.json` | Evaluation cases. |
-| `eval-results/` | Generated reports. Git-ignored. |
+| `../eval-results/` (repository root) | Generated reports. Git-ignored. |
 
 No production code under `server/` was changed. Both variants call the existing `generateReply(systemPrompt, history, options)` contract, and the graph variant is `createInterviewWorkflow` with the real `buildPrompt`. These existing seams were enough.
 
@@ -81,12 +81,13 @@ To add a case, copy a fixture, keep the data synthetic, add the new candidate's 
 cd Call_listener_Backend
 npm run eval                                   # both variants, fake provider, free
 npm run eval -- --variant graph                # one variant
-npm run eval -- --out /tmp/eval                # other output directory
 npm run eval -- --provider openrouter --live --max-usd 0.05            # paid, capped
 npm run eval -- --provider openrouter --live --max-usd 0.05 --model <allowlisted id>
 ```
 
-Each run writes `eval-results/<timestamp>-<provider>.json` (all results, answers, scores, aggregates, gate, and fixture SHA-256 fingerprints) and a matching `.md`. The Markdown has the per-variant comparison table, the Phase 4 gate table, and the failing cases. `--fixtures` and `--out` must resolve, after symlinks, to a directory inside `Call_listener_Backend/` or the OS temp directory. Both are checked before any model call. Fixture and report file names may contain only letters, digits, `.`, `_`, and `-`. The exit code is `0` for a completed run and `2` for a configuration, path, fixture, or cost-cap refusal. A failing gate does not change the exit code.
+Each run writes `<timestamp>-<fake|openrouter>.json` (all results, answers, scores, aggregates, gate, and fixture SHA-256 fingerprints) and a matching `.md` to `eval-results/` at the repository root. The Markdown has the per-variant comparison table, the Phase 4 gate table, and the failing cases.
+
+The fixture and output directories are fixed, derived from the script's own location, and no command-line option can change them. No command-line text ever becomes part of a filesystem path. The report file name is built only from the run's timestamp and a provider tag chosen from a fixed allowlist (`fake` or `openrouter`). Fixture and report file names may contain only letters, digits, `.`, `_`, and `-`. Tests that need temporary directories pass `fixturesDir` / `outDir` to `main()` or to the library functions directly. The exit code is `0` for a completed run and `2` for a configuration, fixture, or cost-cap refusal. A failing gate does not change the exit code.
 
 Fake-provider runs are a harness and pipeline check, not a model-quality measurement. The fake answers from the evidence in the prompt it receives. It uses evidence that matches the latest interviewer turn, then evidence that matches earlier turns, and it states that evidence is missing when nothing matches. So it shows what each variant's prompt makes possible. Its latency is local pipeline overhead only. Its token and cost columns show what the prompts would cost at the configured prices.
 
@@ -152,6 +153,6 @@ Per-model pricing is not implemented: one price pair covers every allowlisted mo
 - a capped live run through the real adapter with a stubbed `ChatOpenRouter`, checking that the key is never written;
 - a full fake run that produces both report files;
 - error-code-only failure records and the cancellation check;
-- path restrictions, including symlink escapes, and safe file names.
+- the absence of path options, fixed report names, and safe file names.
 
 Both files are listed in `npm test` and `npm run test:unit`.

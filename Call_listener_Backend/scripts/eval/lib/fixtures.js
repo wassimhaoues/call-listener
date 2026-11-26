@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
+import path from "node:path";
 import { z } from "zod";
 import { CandidateInterviewContextSchema } from "../../../server/contracts/interviewContext.js";
 import { containsTerm } from "./metrics.js";
-import { resolveSafeDirectory, safeJoin } from "./safePaths.js";
+import { safeJoin } from "./safePaths.js";
 
 export const QUESTION_TYPES = Object.freeze(["behavioral", "technical", "multipart", "follow-up", "no-evidence"]);
 
@@ -200,11 +201,11 @@ async function readCase(directory, name) {
 }
 
 /**
- * Load, validate, and fingerprint every `*.json` case in `directory`, which
- * must be inside the backend root or the OS temp directory.
+ * Load, validate, and fingerprint every `*.json` case in `directory`. The CLI
+ * always passes the fixed fixture directory; tests may pass a temp directory.
  */
 export async function loadFixtures(directory) {
-  const safeDirectory = await resolveSafeDirectory(directory, "--fixtures");
+  const safeDirectory = path.resolve(directory);
   const names = (await readdir(safeDirectory))
     .filter((name) => name.endsWith(".json"))
     .sort((a, b) => a.localeCompare(b));

@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
-import { assertSafeFileName, resolveSafeDirectory, safeJoin } from "./safePaths.js";
+import path from "node:path";
+import { assertSafeFileName, safeJoin, UnsafePathError } from "./safePaths.js";
 
 const METRIC_ROWS = [
   ["Questions (completed / errors / skipped)", (agg) => [agg.completed, agg.errors, agg.skipped].join(" / ")],
@@ -102,17 +103,24 @@ export function renderMarkdown(report) {
   return `${lines.join("\n")}\n`;
 }
 
+const STAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$/;
+
 /**
- * Write `<stamp>-<provider>.json` and `.md` under `outDir`, which must be
- * inside the backend root or the OS temp directory; returns both paths.
+ * The report file base name, built only from the run's clock and a provider
+ * tag chosen from a fixed allowlist (never from command-line text).
  */
+export function reportBaseName(report, date = new Date(report.generatedAt)) {
+  const stamp = date.toISOString().replace(/\.\d+Z$/, "Z").replaceAll(":", "-");
+  if (!STAMP_PATTERN.test(stamp)) throw new UnsafePathError(`Unexpected report timestamp: ${stamp}`);
+  const tag = report.live ? "openrouter" : "fake";
+  return assertSafeFileName([stamp, tag].join("-"));
+}
+
+/** Write `<stamp>-<fake|openrouter>.json` and `.md` under `outDir`; returns both paths. */
 export async function writeReport(report, outDir) {
-  const requested = await resolveSafeDirectory(outDir, "--out");
-  await mkdir(requested, { recursive: true });
-  // Re-check after creation so a symlinked parent cannot redirect the write.
-  const directory = await resolveSafeDirectory(requested, "--out");
-  const stamp = report.generatedAt.replaceAll(":", "-").replace(/\.\d+Z$/, "Z");
-  const base = assertSafeFileName([stamp, report.provider].join("-"));
+  const directory = path.resolve(outDir);
+  await mkdir(directory, { recursive: true });
+  const base = reportBaseName(report);
   const jsonPath = safeJoin(directory, `${base}.json`);
   const markdownPath = safeJoin(directory, `${base}.md`);
   await writeFile(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
