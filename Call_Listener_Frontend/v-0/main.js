@@ -24,7 +24,7 @@ const { autoUpdater } = require("electron-updater");
 const isDev = process.env.NODE_ENV === "development" && !app.isPackaged;
 const gotLock = app.requestSingleInstanceLock();
 
-const APP_ID = "com.coworky.calllistener";
+const { AUTH_APP_ID, WINDOWS_APP_USER_MODEL_ID } = require("./services/appIdentity");
 const BACKEND_HOST = process.env.CALL_HOST || (isDev ? "127.0.0.1" : "call.coworky.org");
 const BACKEND_PROTOCOL = process.env.CALL_PROTOCOL || (isDev ? "http" : "https");
 const BACKEND_PORT = Number(process.env.CALL_PORT || (isDev ? 3000 : 443));
@@ -460,7 +460,7 @@ if (!gotLock) {
 // Windows shell identity (taskbar grouping/notifications), not audio routing;
 // audio behavior is chosen by the platform-audio adapter below.
 if (process.platform === "win32") {
-  app.setAppUserModelId(APP_ID);
+  app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
 }
 
 if (isDev) {
@@ -498,7 +498,7 @@ app.whenReady().then(async () => {
   const installationId = getOrCreateInstallationId(userDataDir);
   const authMgr = new AuthManager({
     requestClient: BACKEND_PROTOCOL === "https" ? https : http,
-    appId: APP_ID,
+    appId: AUTH_APP_ID,
     backendHost: BACKEND_HOST,
     backendProtocol: BACKEND_PROTOCOL,
     backendPort: BACKEND_PORT,

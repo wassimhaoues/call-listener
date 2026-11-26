@@ -8,7 +8,7 @@ Dependencies: **0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8**. Phase 3 scr
 
 Outcome: the current system can be rebuilt, exercised, and compared against later versions.
 
-- [ ] Inventory source, configuration names, package locks, existing binaries, audio assets, and release identifiers without copying credentials.
+- [x] Inventory source, configuration names, package locks, existing binaries, audio assets, and release identifiers without copying credentials. **Complete 2026-11-26:** [baseline inventory](inventory.md) (names and locations only, no secret values). It found the Windows AppUserModelID set at runtime did not match the installer's `appId`, now fixed and test-guarded.
 - [x] Establish a recoverable source snapshot/version-control baseline; preserve all existing files. Record installer provenance separately from the source build. Git repository published to GitHub (2026-11-25); third-party Windows binaries are fetched in CI from upstream with recorded hashes rather than committed.
 - [x] Verify the current Node/package compatibility and run an isolated LangChain/LangGraph/OpenRouter construction test; exact backend package versions are locked. Windows build prerequisites still need a supported Windows machine.
 - [ ] Record Ubuntu 24.04/PipeWire as the Linux target and run the Linux baseline from [Linux desktop support](08-linux-support.md).
