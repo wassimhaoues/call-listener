@@ -82,9 +82,10 @@ function fakeStream() {
   return { track, stream: { getTracks: () => [track] } };
 }
 
-function setupLinux({ enumerations, getUserMedia } = {}) {
+function setupLinux({ enumerations, getUserMedia, createInterviewerSource } = {}) {
   window.callApi = {
     getPlatformCapabilities: vi.fn().mockResolvedValue(LINUX_CAPABILITIES),
+    ...(createInterviewerSource ? { createInterviewerSource } : {}),
   };
   const enumerateDevices = vi.fn();
   for (const list of enumerations) enumerateDevices.mockResolvedValueOnce(list);
@@ -199,6 +200,35 @@ it("explains when no monitor source is found", async () => {
 
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
   expect(localStorage.getItem("systemAudioEnabled")).toBe("false");
+});
+
+it("offers no add-source button without the main-process API", async () => {
+  setupLinux({ enumerations: [[MIC]] });
+  await screen.findByText(/No system output monitor sources are visible/);
+  expect(screen.queryByRole("button", { name: "Add system output source" })).toBeNull();
+});
+
+it("adds a system output source on request and lists it without selecting it", async () => {
+  const added = { kind: "audioinput", deviceId: "cl-1", label: "Monitor of system output (Call Listener)" };
+  const createInterviewerSource = vi.fn().mockResolvedValue({ ok: true });
+  setupLinux({ enumerations: [[MIC], [MIC, added]], createInterviewerSource });
+
+  fireEvent.click(await screen.findByRole("button", { name: "Add system output source" }));
+
+  await screen.findByRole("option", { name: "Monitor of system output (Call Listener)" });
+  expect(createInterviewerSource).toHaveBeenCalledTimes(1);
+  expect(interviewerSelect()).toHaveValue("");
+  expect(screen.queryByRole("button", { name: "Add system output source" })).toBeNull();
+});
+
+it("explains why a system output source could not be added", async () => {
+  const createInterviewerSource = vi.fn().mockResolvedValue({ ok: false, code: "pactl-unavailable" });
+  setupLinux({ enumerations: [[MIC]], createInterviewerSource });
+
+  fireEvent.click(await screen.findByRole("button", { name: "Add system output source" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent(/pactl tool is missing/);
+  expect(screen.queryByRole("combobox", { name: "Interviewer source" })).toBeNull();
 });
 
 it("explains a denied audio permission and stays in microphone-only mode", async () => {

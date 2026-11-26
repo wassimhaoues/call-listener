@@ -15,6 +15,11 @@ const SVV = String.raw`C:\fake\SoundVolumeView.exe`;
 const SPEAKERS = String.raw`Realtek\Device\Speakers\Render`;
 
 const silentLogger = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
+// Stand-in for linuxInterviewerSource so adapter tests never run pactl.
+const fakeRemap = (result = { ok: true, label: "Monitor of system output (Call Listener)" }) => ({
+  create: vi.fn(async () => result),
+  remove: vi.fn(async () => ({ ok: true, removed: 0 })),
+});
 
 // The public AudioRouteManager methods the Windows adapter relies on. The
 // fake below must keep this exact surface so it cannot drift from the real one.
@@ -294,7 +299,7 @@ describe("Linux adapter", () => {
   });
 
   it("reaches ready in microphone-only mode", async () => {
-    const adapter = createLinuxAudioAdapter({ logger: silentLogger });
+    const adapter = createLinuxAudioAdapter({ logger: silentLogger, interviewerSource: fakeRemap() });
     expect(await adapter.prepare()).toEqual({ ok: true });
     expect(await adapter.ensureReady()).toEqual({ status: "ready" });
     expect(await adapter.enableRouting()).toEqual({ changed: false, reason: "not-supported" });
@@ -308,7 +313,7 @@ describe("Linux adapter", () => {
   });
 
   it("stops only app-registered streams, once, across disable and exit", async () => {
-    const adapter = createLinuxAudioAdapter({ logger: silentLogger });
+    const adapter = createLinuxAudioAdapter({ logger: silentLogger, interviewerSource: fakeRemap() });
     const mine = { stop: vi.fn() };
     const released = { stop: vi.fn() };
     adapter.trackStream("mic", mine);
@@ -328,7 +333,7 @@ describe("Linux adapter", () => {
   });
 
   it("keeps exiting when a stream fails to stop and reports a code", async () => {
-    const adapter = createLinuxAudioAdapter({ logger: silentLogger });
+    const adapter = createLinuxAudioAdapter({ logger: silentLogger, interviewerSource: fakeRemap() });
     const ok = { stop: vi.fn() };
     adapter.trackStream("bad", { stop: () => { throw new Error("boom"); } });
     adapter.trackStream("ok", ok);
@@ -338,8 +343,87 @@ describe("Linux adapter", () => {
   });
 
   it("validates stream handles", () => {
-    const adapter = createLinuxAudioAdapter({ logger: silentLogger });
+    const adapter = createLinuxAudioAdapter({ logger: silentLogger, interviewerSource: fakeRemap() });
     expect(() => adapter.trackStream("x", {})).toThrow(TypeError);
     expect(() => adapter.trackStream("", { stop() {} })).toThrow(TypeError);
+  });
+});
+
+describe("Linux interviewer source", () => {
+  const {
+    createLinuxInterviewerSource,
+    ownModuleIds,
+  } = require("../services/platformAudio/linuxInterviewerSource.js");
+
+  function fakePactl({ sink = "alsa_output.pci-0000_00_1f.3.analog-stereo", modules = "", missing = false } = {}) {
+    const calls = [];
+    const run = vi.fn(async (args) => {
+      calls.push(args);
+      if (missing) throw Object.assign(new Error("spawn pactl ENOENT"), { code: "ENOENT" });
+      if (args[0] === "get-default-sink") return `${sink}\n`;
+      if (args[0] === "list") return modules;
+      if (args[0] === "load-module") return "536870914\n";
+      return "";
+    });
+    return { run, calls };
+  }
+
+  it("mirrors the default output's monitor under a recognisable label", async () => {
+    const { run, calls } = fakePactl();
+    const result = await createLinuxInterviewerSource({ run, logger: silentLogger }).create();
+    expect(result).toEqual({ ok: true, label: "Monitor of system output (Call Listener)" });
+    const load = calls.find((args) => args[0] === "load-module");
+    expect(load).toEqual([
+      "load-module",
+      "module-remap-source",
+      "master=alsa_output.pci-0000_00_1f.3.analog-stereo.monitor",
+      "source_name=call_listener_interviewer",
+      'source_properties="node.description=\\"Monitor of system output (Call Listener)\\" device.description=\\"Monitor of system output (Call Listener)\\""',
+    ]);
+    // Never changes the default devices.
+    expect(calls.some((args) => /^set-default/.test(args[0]))).toBe(false);
+  });
+
+  it("replaces only its own earlier source", async () => {
+    const modules = [
+      "12\tmodule-remap-source\tmaster=x.monitor source_name=call_listener_interviewer source_properties=...",
+      "13\tmodule-remap-source\tmaster=y.monitor source_name=someone_else",
+      "14\tmodule-null-sink\tsink_name=call_listener_interviewer_lookalike",
+    ].join("\n");
+    expect(ownModuleIds(modules)).toEqual(["12"]);
+    const { run, calls } = fakePactl({ modules });
+    await createLinuxInterviewerSource({ run, logger: silentLogger }).create();
+    expect(calls.filter((args) => args[0] === "unload-module")).toEqual([["unload-module", "12"]]);
+    expect(await createLinuxInterviewerSource({ run, logger: silentLogger }).remove()).toEqual({
+      ok: true,
+      removed: 1,
+    });
+  });
+
+  it("refuses an unsafe sink name and reports a missing pactl by code", async () => {
+    const unsafe = fakePactl({ sink: 'evil" source_name=x' });
+    expect(await createLinuxInterviewerSource({ run: unsafe.run, logger: silentLogger }).create()).toEqual({
+      ok: false,
+      code: "no-default-output",
+    });
+    expect(unsafe.calls.some((args) => args[0] === "load-module")).toBe(false);
+
+    const missing = fakePactl({ missing: true });
+    const source = createLinuxInterviewerSource({ run: missing.run, logger: silentLogger });
+    expect(await source.create()).toEqual({ ok: false, code: "pactl-unavailable" });
+    expect(await source.remove()).toEqual({ ok: false, code: "pactl-unavailable" });
+  });
+
+  it("is created only on request and removed at startup and on exit", async () => {
+    const remap = fakeRemap();
+    const adapter = createLinuxAudioAdapter({ logger: silentLogger, interviewerSource: remap });
+    await adapter.prepare();
+    expect(remap.remove).toHaveBeenCalledTimes(1);
+    expect(remap.create).not.toHaveBeenCalled();
+    expect(await adapter.createInterviewerSource()).toMatchObject({ ok: true });
+    await adapter.gracefulExit();
+    await adapter.gracefulExit();
+    expect(remap.remove).toHaveBeenCalledTimes(2);
+    expect(await adapter.createInterviewerSource()).toEqual({ ok: false, code: "exited" });
   });
 });

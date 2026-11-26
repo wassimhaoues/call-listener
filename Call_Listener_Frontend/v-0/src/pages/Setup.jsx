@@ -44,6 +44,7 @@ export default function Setup() {
   const [monitors, setMonitors] = useState([]);
   const [labelsVisible, setLabelsVisible] = useState(true);
   const [monitorScan, setMonitorScan] = useState("idle");
+  const [createState, setCreateState] = useState("idle");
   const [micId, setMicId] = useState(localStorage.getItem("micId") || "");
   const [sysId, setSysId] = useState(localStorage.getItem("sysId") || "");
   const [note, setNote] = useState("");
@@ -99,10 +100,39 @@ export default function Setup() {
         found.some((d) => d.deviceId === current) ? current : NO_INTERVIEWER_SOURCE
       );
       setMonitorScan(denied ? "denied" : "ready");
+      return found.length;
     } catch {
       if (mountedRef.current) setMonitorScan("error");
+      return 0;
     }
   }, []);
+
+  // Linux: add the remapped monitor of the default output (explicit action),
+  // then list devices again. Chromium can take a moment to see a new source.
+  const createInterviewerSource = useCallback(async () => {
+    setCreateState("creating");
+    let result;
+    try {
+      result = await window.callApi.createInterviewerSource();
+    } catch {
+      result = { ok: false };
+    }
+    if (!mountedRef.current) return;
+    if (!result?.ok) {
+      setCreateState(`failed:${result?.code || "failed"}`);
+      return;
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const found = await refreshLinuxDevices();
+      if (!mountedRef.current) return;
+      if (found > 0) {
+        setCreateState("idle");
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    setCreateState("failed:not-found");
+  }, [refreshLinuxDevices]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -280,6 +310,12 @@ export default function Setup() {
                 scan={monitorScan}
                 onAllowAccess={() => refreshLinuxDevices({ requestPermission: true })}
                 onRefresh={() => refreshLinuxDevices()}
+                onCreateSource={
+                  typeof window.callApi?.createInterviewerSource === "function"
+                    ? createInterviewerSource
+                    : undefined
+                }
+                createState={createState}
               />
             )}
           </div>
