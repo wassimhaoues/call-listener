@@ -9,6 +9,13 @@ const SPEAKER_BY_LABEL = Object.freeze({ mic: "you", system: "caller" });
 // Response actions rewrite the latest answer; clarify produces questions for
 // the interviewer instead, so it never becomes the answer later actions use.
 const ANSWER_KINDS = new Set(["answer", "regenerate", "shorten", "expand"]);
+// Interviewer utterances since the candidate last spoke form one turn, so a
+// question split across pauses ("Tell me about Acme." … "What was hard?")
+// is one multipart question for response actions. A longer silence starts a
+// new turn; parts and characters are bounded.
+export const INTERVIEWER_TURN_WINDOW_MS = 20_000;
+export const MAX_INTERVIEWER_TURN_PARTS = 4;
+export const MAX_INTERVIEWER_TURN_CHARS = 2_000;
 const TRANSFORM_KINDS = new Set(["shorten", "expand"]);
 
 function withTimeout(operation, ms, controller, label = "operation") {
@@ -96,6 +103,7 @@ export class StreamManager {
     this.requestVersion = 0;
     // The question response actions apply to, and its latest final answer.
     this.currentQuestion = { version: 0, text: "", answerText: null, actionCount: 0 };
+    this.interviewerTurn = { parts: [], lastAt: Number.NEGATIVE_INFINITY };
     // { id, kind, questionVersion, state } of the newest generation that
     // reached the client; response actions must name its ID.
     this.latestGeneration = null;
@@ -256,10 +264,23 @@ export class StreamManager {
   async submitInterviewerQuestion(text, wsClient) {
     if (this.closed) return false;
     if (wsClient) this.wsClient = wsClient;
-    return this.handleUtterance("system", text, this.generation);
+    // A typed question is complete on its own: it starts a new turn.
+    return this.handleUtterance("system", text, this.generation, { newTurn: true });
   }
 
-  async handleUtterance(eventLabel, text, eventGeneration) {
+  /** Add an interviewer utterance to the current turn and return the turn's text. */
+  extendInterviewerTurn(text, { newTurn = false } = {}) {
+    const now = this.now();
+    if (newTurn || now - this.interviewerTurn.lastAt > INTERVIEWER_TURN_WINDOW_MS) {
+      this.interviewerTurn = { parts: [], lastAt: now };
+    }
+    this.interviewerTurn.parts = [...this.interviewerTurn.parts, text].slice(-MAX_INTERVIEWER_TURN_PARTS);
+    this.interviewerTurn.lastAt = now;
+    // Keep the end: the latest words are the question being asked.
+    return this.interviewerTurn.parts.join(" ").slice(-MAX_INTERVIEWER_TURN_CHARS);
+  }
+
+  async handleUtterance(eventLabel, text, eventGeneration, { newTurn = false } = {}) {
     if (this.closed) return false;
     const role = eventLabel === "mic" ? "you" : "caller";
     try {
@@ -269,7 +290,7 @@ export class StreamManager {
     }
     if (this.closed || eventGeneration !== this.generation) return false;
 
-    if (this.wsClient?.readyState === this.wsClient.OPEN) {
+    if (this.wsClient && this.wsClient.readyState === this.wsClient.OPEN) {
       try {
         this.wsClient.send(JSON.stringify({ speaker: role, transcript: text }));
       } catch (sendError) {
@@ -280,12 +301,17 @@ export class StreamManager {
       }
     }
 
-    if (eventLabel !== "system") return true;
+    if (eventLabel !== "system") {
+      // The candidate spoke: the interviewer's next words start a new turn.
+      this.interviewerTurn = { parts: [], lastAt: Number.NEGATIVE_INFINITY };
+      return true;
+    }
+    const turnText = this.extendInterviewerTurn(text, { newTurn });
     if (!isInterviewerQuestion(text)) {
       this.log.debug(`Skipping non-question interviewer turn [${this.sessionId}]`);
       return true;
     }
-    this.queueQuestion(eventGeneration, text);
+    this.queueQuestion(eventGeneration, turnText);
     return true;
   }
 

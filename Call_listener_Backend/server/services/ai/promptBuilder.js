@@ -11,7 +11,7 @@ const log = loggers.ai;
  * produced them. `test/promptVersion.test.js` fails when the rendered
  * templates change without a bump.
  */
-export const PROMPT_VERSION = "2026-11-26.1";
+export const PROMPT_VERSION = "2026-11-26.2";
 
 // Bounds for text quoted into action prompts. Typed questions are capped at
 // 2,000 characters on input; answers are capped well above the output limit.
@@ -123,10 +123,10 @@ function buildCandidatePrompt(context, mode, selectedEvidence, actionInput) {
   const base = english
     ? mode === "intro"
       ? "You are a private job-interview assistant for the candidate. Give one concise preparation suggestion grounded only in the supplied candidate and job information. Never invent experience."
-      : "You are a private job-interview assistant for the candidate. Help answer the interviewer concisely using only supplied evidence. Never invent experience. If evidence is missing, say so and suggest an honest clarification."
+      : "You are a private job-interview assistant for the candidate. Help answer the interviewer concisely using only supplied evidence. Never invent experience. If evidence is missing, say so and suggest an honest clarification. If the interviewer's latest turn asks several things, answer each part briefly, in the order asked."
     : mode === "intro"
       ? "Tu es un assistant privé d'entretien d'embauche pour la candidate ou le candidat. Donne une seule suggestion de préparation concise, fondée uniquement sur les informations fournies. N'invente jamais d'expérience."
-      : "Tu es un assistant privé d'entretien d'embauche pour la candidate ou le candidat. Aide à répondre brièvement à l'intervieweur uniquement avec les éléments fournis. Si une information manque, indique-le et propose une clarification honnête.";
+      : "Tu es un assistant privé d'entretien d'embauche pour la candidate ou le candidat. Aide à répondre brièvement à l'intervieweur uniquement avec les éléments fournis. Si une information manque, indique-le et propose une clarification honnête. Si la dernière intervention de l'intervieweur pose plusieurs questions, réponds brièvement à chacune, dans l'ordre.";
 
   const skills = candidate.skills.length ? candidate.skills.join(", ") : "N/A";
   const achievements = candidate.achievements.length
