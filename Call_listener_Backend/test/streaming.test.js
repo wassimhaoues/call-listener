@@ -224,11 +224,11 @@ test("the LangGraph workflow forwards onToken to the reply generator", async () 
 // --- Capability negotiation -------------------------------------------------
 
 test("parses client capabilities, ignoring unknown names and rejecting malformed lists", () => {
-  assert.deepEqual(parseClientCapabilities({ version: 1 }), { stream: false, actions: false });
-  assert.deepEqual(parseClientCapabilities(undefined), { stream: false, actions: false });
-  assert.deepEqual(parseClientCapabilities({ capabilities: [] }), { stream: false, actions: false });
-  assert.deepEqual(parseClientCapabilities({ capabilities: ["stream"] }), { stream: true, actions: false });
-  assert.deepEqual(parseClientCapabilities({ capabilities: ["future", " stream ", "actions"] }), { stream: true, actions: true });
+  assert.deepEqual(parseClientCapabilities({ version: 1 }), { stream: false, actions: false, interim: false });
+  assert.deepEqual(parseClientCapabilities(undefined), { stream: false, actions: false, interim: false });
+  assert.deepEqual(parseClientCapabilities({ capabilities: [] }), { stream: false, actions: false, interim: false });
+  assert.deepEqual(parseClientCapabilities({ capabilities: ["stream"] }), { stream: true, actions: false, interim: false });
+  assert.deepEqual(parseClientCapabilities({ capabilities: ["future", " stream ", "actions"] }), { stream: true, actions: true, interim: false });
   for (const capabilities of ["stream", [1], [""], ["x".repeat(33)], Array(9).fill("stream"), { stream: true }]) {
     assert.throws(() => parseClientCapabilities({ capabilities }), undefined, JSON.stringify(capabilities));
   }
@@ -275,7 +275,7 @@ test("the message handler negotiates streaming from each accepted context", asyn
   await harness.send({ context: { caller: { name: "Bob" }, capabilities: ["stream"] } });
   await harness.send({ context: { caller: { name: "Bob" } } });
 
-  assert.deepEqual(harness.capabilityCalls, [{ stream: true, actions: false }, { stream: false, actions: false }]);
+  assert.deepEqual(harness.capabilityCalls, [{ stream: true, actions: false, interim: false }, { stream: false, actions: false, interim: false }]);
   assert.ok(harness.stored.every((context) => !("capabilities" in context)));
   assert.deepEqual(harness.outbound, [{ ai_reply: "Intro." }, { ai_reply: "Intro." }], "intros stay non-streamed");
 });

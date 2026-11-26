@@ -65,3 +65,39 @@ it("keeps following new entries once the transcript is at its cap", () => {
   rerender(<TranscriptLog entries={shifted} />);
   expect(scroller.scrollTo).toHaveBeenCalledWith({ top: 500, behavior: "smooth" });
 });
+
+it("shows in-progress lines after the transcript, dimmed and marked as speaking", () => {
+  const { container } = render(
+    <TranscriptLog
+      entries={[{ id: 1, role: "interviewer", text: "Tell me about yourself." }]}
+      interim={{ interviewer: "", candidate: "<b>I started</b>" }}
+    />
+  );
+  expect(screen.getByText("Candidate (speaking…)")).toBeInTheDocument();
+  const line = screen.getByText("<b>I started</b>…");
+  expect(line.className).toMatch(/italic/);
+  expect(container.querySelector("b")).toBeNull();
+  const rows = container.querySelectorAll("[data-interim]");
+  expect(rows).toHaveLength(1);
+  expect(container.firstElementChild.firstElementChild.lastElementChild).toBe(rows[0]);
+});
+
+it("shows an in-progress line before the first final transcript", () => {
+  render(<TranscriptLog entries={[]} interim={{ interviewer: "Thanks for", candidate: "" }} />);
+  expect(screen.queryByText("Waiting for audio…")).toBeNull();
+  expect(screen.getByText("Interviewer (speaking…)")).toBeInTheDocument();
+  expect(screen.getByText("Thanks for…")).toBeInTheDocument();
+});
+
+it("follows growing in-progress lines when the reader is near the bottom", () => {
+  vi.stubGlobal("requestAnimationFrame", (callback) => callback());
+  const entries = [{ id: 1, role: "candidate", text: "One" }];
+  const { container, rerender } = render(
+    <TranscriptLog entries={entries} interim={{ interviewer: "Tell", candidate: "" }} />
+  );
+  const scroller = scrollerFor(container, { scrollHeight: 500, clientHeight: 200, scrollTop: 290 });
+  rerender(<TranscriptLog entries={entries} interim={{ interviewer: "Tell me", candidate: "" }} />);
+  expect(scroller.scrollTo).toHaveBeenCalledTimes(1);
+  rerender(<TranscriptLog entries={entries} interim={{ interviewer: "Tell me", candidate: "" }} />);
+  expect(scroller.scrollTo).toHaveBeenCalledTimes(1);
+});

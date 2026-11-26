@@ -18,8 +18,9 @@ export function bytesToBase64(bytes) {
 // level of every context message. The server ignores names it doesn't know.
 // `resume` opts into resumable sessions: sequenced server messages, a session
 // ID, and `{ resume }` after an unexpected disconnect. `debrief` lets "Stop
-// and review" end with `{ end: { debrief: true } }`.
-export const CLIENT_CAPABILITIES = Object.freeze(["stream", "resume", "debrief"]);
+// and review" end with `{ end: { debrief: true } }`. `interim` asks for
+// throttled in-progress transcript lines (`{ interim: { speaker, text } }`).
+export const CLIENT_CAPABILITIES = Object.freeze(["stream", "resume", "debrief", "interim"]);
 
 export function encodeContextMessage(context) {
   const isObject = context && typeof context === "object" && !Array.isArray(context);

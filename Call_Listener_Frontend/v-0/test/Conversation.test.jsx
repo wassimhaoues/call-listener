@@ -60,7 +60,7 @@ it("composes capture, socket, and guidance state into the live workspace", async
       context: {
         version: 1,
         evidence: [{ requirement: "Redis", evidence: "Led a Redis migration" }],
-        capabilities: ["stream", "resume", "debrief"],
+        capabilities: ["stream", "resume", "debrief", "interim"],
       },
     },
   ]);
@@ -233,7 +233,7 @@ it("shows Reconnecting… after a drop and offers a new session once reconnectio
     expect(FakeWebSocket.instances).toHaveLength(attempts + 1);
     const fresh = FakeWebSocket.latest();
     act(() => fresh.serverOpen());
-    expect(fresh.sentMessages[0].context.capabilities).toEqual(["stream", "resume", "debrief"]);
+    expect(fresh.sentMessages[0].context.capabilities).toEqual(["stream", "resume", "debrief", "interim"]);
     expect(screen.queryByRole("button", { name: "Start new session" })).toBeNull();
     expect(screen.getByText("Listening")).toBeInTheDocument();
   } finally {
