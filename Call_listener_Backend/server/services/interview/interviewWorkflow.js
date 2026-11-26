@@ -20,15 +20,30 @@ export function createInterviewWorkflow({ buildPrompt, generateReply } = {}) {
     onModel: Annotation({ default: () => undefined }),
     // Optional: when set, the reply generator streams text deltas to it.
     onToken: Annotation({ default: () => undefined }),
+    // "reply" for an interview answer, or a response-action kind
+    // ("regenerate", "shorten", "expand", "clarify").
+    mode: Annotation(),
+    // Response actions only: the interviewer question and, for shorten and
+    // expand, the previous final answer. Both reach the prompt as data.
+    question: Annotation(),
+    previousAnswer: Annotation(),
     selectedEvidence: Annotation({ default: () => [] }),
     suggestion: Annotation({ default: () => "" }),
   });
   const graph = new StateGraph(State)
     .addNode("selectEvidence", (state) => ({
-      selectedEvidence: selectRelevantEvidence(state.context, state.history),
+      // An action reuses its question's evidence: by then the history ends
+      // with the answer, not the question.
+      selectedEvidence: selectRelevantEvidence(
+        state.context,
+        state.question ? `caller: ${state.question}` : state.history
+      ),
     }))
     .addNode("generateSuggestion", async (state) => {
-      const prompt = buildPrompt(state.context, "reply", state.selectedEvidence);
+      const prompt = buildPrompt(state.context, state.mode || "reply", state.selectedEvidence, {
+        question: state.question,
+        previousAnswer: state.previousAnswer,
+      });
       const suggestion = await generateReply(prompt, state.history, {
         signal: state.signal,
         onUsage: state.onUsage,

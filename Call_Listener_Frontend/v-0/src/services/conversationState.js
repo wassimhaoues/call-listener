@@ -69,6 +69,20 @@ export const MAX_STREAMED_SUGGESTION_CHARS = 20_000;
 // status line does not flicker on every 20 ms batch.
 const DROPPED_CHUNK_STATUS_INTERVAL = 25;
 
+// `generation.kind` values the server reports: a normal answer, or the
+// response action that produced the suggestion. Anything else is ignored.
+export const GENERATION_KINDS = Object.freeze(["answer", "regenerate", "shorten", "expand", "clarify"]);
+
+// Candidate-facing explanations for `{ error: "action_rejected", reason }`.
+export const ACTION_REJECTION_TEXT = Object.freeze({
+  stale_generation: "That suggestion is no longer current, so it can't be changed.",
+  no_final_answer: "There is no finished answer to change yet.",
+  rate_limited: "Too many requests. Wait a moment and try again.",
+  question_limit_reached: "Action limit reached for this question.",
+  disconnected: "The connection dropped before the request ran. Try again.",
+});
+export const ACTION_REJECTED_FALLBACK_TEXT = "That request could not run.";
+
 export const ACTION = {
   CONNECTION_CHANGED: "connection_changed",
   CAPTURE_STARTED: "capture_started",
@@ -76,6 +90,7 @@ export const ACTION = {
   NOTICE_SHOWN: "notice_shown",
   SERVER_MESSAGE: "server_message",
   TYPED_QUESTION_SUBMITTED: "typed_question_submitted",
+  RESPONSE_ACTION_SENT: "response_action_sent",
   PAUSE_CHANGED: "pause_changed",
   AUDIO_CHUNK_DROPPED: "audio_chunk_dropped",
 };
@@ -96,6 +111,11 @@ export const serverMessageReceived = (message) => ({
 export const typedQuestionSubmitted = (question) => ({
   type: ACTION.TYPED_QUESTION_SUBMITTED,
   question,
+});
+// The candidate asked to regenerate/shorten/expand/clarify the suggestion.
+export const responseActionSent = (actionType) => ({
+  type: ACTION.RESPONSE_ACTION_SENT,
+  actionType,
 });
 export const pauseChanged = (paused) => ({ type: ACTION.PAUSE_CHANGED, paused });
 export const audioChunkDropped = () => ({ type: ACTION.AUDIO_CHUNK_DROPPED });
@@ -126,6 +146,7 @@ export function deriveStatus(state) {
   if (state.notice) return state.notice;
   if (state.generation === GENERATION.BUDGET_REACHED) return STATUS.BUDGET_REACHED;
   if (state.modelUnavailable) return STATUS.MODEL_UNAVAILABLE;
+  if (state.pendingAction) return STATUS.THINKING;
   // Streaming still means "the answer is being prepared".
   if (state.generation === GENERATION.THINKING) return STATUS.THINKING;
   if (state.generation === GENERATION.STREAMING) return STATUS.THINKING;
@@ -150,6 +171,14 @@ const baseState = {
   // generation, and whether `suggestion` is still-growing partial text.
   generationId: null,
   isStreaming: false,
+  // Response actions: the kind of the shown suggestion ("answer", "shorten",
+  // …), the ID of the completed generation it came from (the only one an
+  // action may target), the action sent but not yet started by the server,
+  // and the explanation of the last rejected action.
+  generationKind: null,
+  finalGenerationId: null,
+  pendingAction: null,
+  actionError: "",
   isPaused: false,
   droppedAudioChunks: 0,
   // Resumable sessions: the server session ID and the highest `seq` applied,
@@ -235,16 +264,21 @@ function isForCurrentGeneration(state, message) {
   return typeof id === "string" && id !== "" && id === state.generationId;
 }
 
+function toGenerationKind(kind) {
+  return GENERATION_KINDS.includes(kind) ? kind : null;
+}
+
 function applyGenerationResult(state, message) {
   const failed = message.generation?.state === "failed";
   if (!failed && !message.ai_reply) return state;
   if (!isForCurrentGeneration(state, message)) return state;
   // A tagged terminal message completes its generation exactly once; a
   // duplicate for the same ID no longer matches and is ignored.
-  const generationId = hasGenerationId(message) ? null : state.generationId;
+  const tagged = hasGenerationId(message);
+  const generationId = tagged ? null : state.generationId;
   if (failed) {
     // Terminal for this question: transcription keeps running. Any partial
-    // streamed text is discarded.
+    // streamed text is discarded, and there is no suggestion to act on.
     return {
       ...state,
       suggestion: GUIDANCE_UNAVAILABLE_TEXT,
@@ -253,10 +287,13 @@ function applyGenerationResult(state, message) {
       isStreaming: false,
       generationId,
       generation: GENERATION.FAILED,
+      finalGenerationId: null,
+      pendingAction: null,
       notice: null,
     };
   }
-  // The final reply replaces any streamed text.
+  // The final reply replaces any streamed text. Only a reply that names its
+  // generation (not the introductory suggestion) can be acted on.
   return {
     ...state,
     suggestion: toSuggestionText(message.ai_reply),
@@ -265,13 +302,18 @@ function applyGenerationResult(state, message) {
     isStreaming: false,
     generationId,
     generation: GENERATION.IDLE,
+    generationKind: tagged
+      ? toGenerationKind(message.generation.kind) ?? state.generationKind
+      : null,
+    finalGenerationId: tagged ? message.generation.id : null,
+    pendingAction: null,
     notice: null,
   };
 }
 
 function applyGenerationThinking(state, message) {
   if (message.generation?.state !== "thinking") return state;
-  const { id } = message.generation;
+  const { id, kind } = message.generation;
   // Clear the previous suggestion so stale guidance is never presented as the
   // answer to the question now being generated.
   return {
@@ -282,6 +324,10 @@ function applyGenerationThinking(state, message) {
     isStreaming: false,
     generationId: typeof id === "string" && id ? id : null,
     generation: GENERATION.THINKING,
+    generationKind: toGenerationKind(kind),
+    finalGenerationId: null,
+    pendingAction: null,
+    actionError: "",
     notice: null,
   };
 }
@@ -317,6 +363,20 @@ function applyServerError(state, message) {
       isStreaming: false,
       generationId: null,
       generation: GENERATION.BUDGET_REACHED,
+      finalGenerationId: null,
+      pendingAction: null,
+    };
+  }
+  if (message.error === "action_rejected") {
+    const reason = typeof message.reason === "string" ? message.reason : "";
+    return {
+      ...state,
+      pendingAction: null,
+      actionError: Object.hasOwn(ACTION_REJECTION_TEXT, reason)
+        ? ACTION_REJECTION_TEXT[reason]
+        : ACTION_REJECTED_FALLBACK_TEXT,
+      // The server no longer accepts actions on this suggestion.
+      finalGenerationId: reason === "stale_generation" ? null : state.finalGenerationId,
     };
   }
   if (message.error === "unsupported_model") {
@@ -332,10 +392,28 @@ const IDLE_GENERATION = {
   isStreaming: false,
   generationId: null,
   generation: GENERATION.IDLE,
+  pendingAction: null,
 };
 
 function isGenerationInProgress(state) {
   return state.generation === GENERATION.THINKING || state.generation === GENERATION.STREAMING;
+}
+
+/**
+ * Whether the response actions (regenerate, shorten, expand, clarify) can
+ * run: a completed suggestion from a live generation is shown, nothing is
+ * being generated or requested, the session is live and not paused, and the
+ * interview budget is not spent.
+ */
+export function canRequestResponseAction(state) {
+  return (
+    state.connection === CONNECTION.OPEN &&
+    !state.isPaused &&
+    !!state.finalGenerationId &&
+    !state.pendingAction &&
+    !isGenerationInProgress(state) &&
+    state.generation !== GENERATION.BUDGET_REACHED
+  );
 }
 
 // `{ session: { id } }` names the server session (resume-capable servers).
@@ -345,10 +423,14 @@ function isGenerationInProgress(state) {
 function applySession(state, message) {
   const id = message.session?.id;
   if (typeof id !== "string" || !id || id === state.sessionId) return state;
-  const restarted = state.sessionId !== null && isGenerationInProgress(state);
+  const replaced = state.sessionId !== null;
+  const restarted = replaced && isGenerationInProgress(state);
   return {
     ...state,
     ...(restarted ? IDLE_GENERATION : {}),
+    // The new session knows none of the old generation IDs.
+    finalGenerationId: replaced ? null : state.finalGenerationId,
+    pendingAction: replaced ? null : state.pendingAction,
     sessionId: id,
     lastSeq: 0,
   };
@@ -396,11 +478,20 @@ function reduceFacts(state, action) {
           ...state,
           ...IDLE_GENERATION,
           suggestion: "",
+          finalGenerationId: null,
           connection: action.connection,
           notice: null,
         };
       }
-      return { ...state, connection: action.connection, notice: null };
+      // A requested action that had not started yet is answered (rejected or
+      // failed) by the resume replay, or never: stop waiting for it.
+      return {
+        ...state,
+        connection: action.connection,
+        pendingAction: null,
+        finalGenerationId: action.connection === CONNECTION.LOST ? null : state.finalGenerationId,
+        notice: null,
+      };
     case ACTION.CAPTURE_STARTED:
       return { ...state, isCapturing: true, notice: null };
     case ACTION.CAPTURE_FAILED:
@@ -425,8 +516,16 @@ function reduceFacts(state, action) {
         isStreaming: false,
         generationId: null,
         generation: GENERATION.THINKING,
+        generationKind: null,
+        finalGenerationId: null,
+        pendingAction: null,
+        actionError: "",
         notice: null,
       };
+    case ACTION.RESPONSE_ACTION_SENT:
+      // The shown suggestion stays until the server's `thinking` for the new
+      // generation replaces it (or a rejection explains why it did not run).
+      return { ...state, pendingAction: action.actionType, actionError: "", notice: null };
     case ACTION.PAUSE_CHANGED:
       return { ...state, isPaused: action.paused, notice: null };
     case ACTION.AUDIO_CHUNK_DROPPED: {

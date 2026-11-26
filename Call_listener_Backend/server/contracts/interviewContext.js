@@ -87,7 +87,7 @@ export function isCandidateInterviewContext(value) {
  * capability names are ignored so newer clients can talk to older servers; a
  * malformed list is rejected.
  */
-export const CLIENT_CAPABILITIES = Object.freeze(["stream", "resume"]);
+export const CLIENT_CAPABILITIES = Object.freeze(["stream", "resume", "actions"]);
 
 const ClientCapabilitiesSchema = z.array(text(32).min(1)).max(8).optional();
 
@@ -99,11 +99,14 @@ export function parseClientCapabilityNames(value) {
 }
 
 /**
- * Generation-related capabilities applied by the stream manager.
- * @returns {{ stream: boolean }}
+ * Generation-related capabilities applied by the stream manager. `actions`
+ * asks for generation IDs and kinds on non-streamed replies, so a client
+ * that does not stream can still target a suggestion with a response action.
+ * @returns {{ stream: boolean, actions: boolean }}
  */
 export function parseClientCapabilities(value) {
-  return { stream: parseClientCapabilityNames(value).includes("stream") };
+  const names = parseClientCapabilityNames(value);
+  return { stream: names.includes("stream"), actions: names.includes("actions") };
 }
 
 /**

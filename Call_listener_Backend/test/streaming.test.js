@@ -219,11 +219,11 @@ test("the LangGraph workflow forwards onToken to the reply generator", async () 
 // --- Capability negotiation -------------------------------------------------
 
 test("parses client capabilities, ignoring unknown names and rejecting malformed lists", () => {
-  assert.deepEqual(parseClientCapabilities({ version: 1 }), { stream: false });
-  assert.deepEqual(parseClientCapabilities(undefined), { stream: false });
-  assert.deepEqual(parseClientCapabilities({ capabilities: [] }), { stream: false });
-  assert.deepEqual(parseClientCapabilities({ capabilities: ["stream"] }), { stream: true });
-  assert.deepEqual(parseClientCapabilities({ capabilities: ["future", " stream "] }), { stream: true });
+  assert.deepEqual(parseClientCapabilities({ version: 1 }), { stream: false, actions: false });
+  assert.deepEqual(parseClientCapabilities(undefined), { stream: false, actions: false });
+  assert.deepEqual(parseClientCapabilities({ capabilities: [] }), { stream: false, actions: false });
+  assert.deepEqual(parseClientCapabilities({ capabilities: ["stream"] }), { stream: true, actions: false });
+  assert.deepEqual(parseClientCapabilities({ capabilities: ["future", " stream ", "actions"] }), { stream: true, actions: true });
   for (const capabilities of ["stream", [1], [""], ["x".repeat(33)], Array(9).fill("stream"), { stream: true }]) {
     assert.throws(() => parseClientCapabilities({ capabilities }), undefined, JSON.stringify(capabilities));
   }
@@ -270,7 +270,7 @@ test("the message handler negotiates streaming from each accepted context", asyn
   await harness.send({ context: { caller: { name: "Bob" }, capabilities: ["stream"] } });
   await harness.send({ context: { caller: { name: "Bob" } } });
 
-  assert.deepEqual(harness.capabilityCalls, [{ stream: true }, { stream: false }]);
+  assert.deepEqual(harness.capabilityCalls, [{ stream: true, actions: false }, { stream: false, actions: false }]);
   assert.ok(harness.stored.every((context) => !("capabilities" in context)));
   assert.deepEqual(harness.outbound, [{ ai_reply: "Intro." }, { ai_reply: "Intro." }], "intros stay non-streamed");
 });
@@ -342,7 +342,7 @@ test("streams thinking, coalesced deltas, then a final done reply with one gener
 
   run.token("Lead ");
   run.token("with ");
-  assert.deepEqual(generationMessages(), [{ generation: { id: "g1", state: "thinking" } }], "tokens are buffered");
+  assert.deepEqual(generationMessages(), [{ generation: { id: "g1", kind: "answer", state: "thinking" } }], "tokens are buffered");
   t.mock.timers.tick(49);
   assert.equal(generationMessages().length, 1, "no flush before the batching interval");
   t.mock.timers.tick(1);
@@ -354,14 +354,14 @@ test("streams thinking, coalesced deltas, then a final done reply with one gener
   await settle();
 
   assert.deepEqual(generationMessages(), [
-    { generation: { id: "g1", state: "thinking" } },
-    { generation: { id: "g1", state: "streaming" }, delta: "Lead with " },
-    { generation: { id: "g1", state: "streaming" }, delta: "the migration." },
-    { generation: { id: "g1", state: "streaming" }, delta: " " },
+    { generation: { id: "g1", kind: "answer", state: "thinking" } },
+    { generation: { id: "g1", kind: "answer", state: "streaming" }, delta: "Lead with " },
+    { generation: { id: "g1", kind: "answer", state: "streaming" }, delta: "the migration." },
+    { generation: { id: "g1", kind: "answer", state: "streaming" }, delta: " " },
     {
       ai_reply: "Lead with the migration.",
       model: { selected: "test/model", actual: null },
-      generation: { id: "g1", state: "done" },
+      generation: { id: "g1", kind: "answer", state: "done" },
     },
   ]);
   t.mock.timers.tick(1_000);
@@ -385,14 +385,14 @@ test("a superseded generation sends no further deltas and the newer one gets a n
 
   assert.equal(first.signal.aborted, true);
   assert.deepEqual(generationMessages(), [
-    { generation: { id: "g1", state: "thinking" } },
-    { generation: { id: "g1", state: "streaming" }, delta: "Old " },
-    { generation: { id: "g2", state: "thinking" } },
-    { generation: { id: "g2", state: "streaming" }, delta: "New answer." },
+    { generation: { id: "g1", kind: "answer", state: "thinking" } },
+    { generation: { id: "g1", kind: "answer", state: "streaming" }, delta: "Old " },
+    { generation: { id: "g2", kind: "answer", state: "thinking" } },
+    { generation: { id: "g2", kind: "answer", state: "streaming" }, delta: "New answer." },
     {
       ai_reply: "New answer.",
       model: { selected: "test/model", actual: null },
-      generation: { id: "g2", state: "done" },
+      generation: { id: "g2", kind: "answer", state: "done" },
     },
   ]);
   assert.deepEqual(history.filter(([, role]) => role === "assistant").map(([, , text]) => text), ["New answer."]);
@@ -408,7 +408,7 @@ test("session end drops buffered deltas and sends nothing further", async (t) =>
   t.mock.timers.tick(500);
   await settle();
 
-  assert.deepEqual(generationMessages(), [{ generation: { id: "g1", state: "thinking" } }]);
+  assert.deepEqual(generationMessages(), [{ generation: { id: "g1", kind: "answer", state: "thinking" } }]);
 });
 
 test("a failed streamed generation reports failure with its ID and the legacy reply", async (t) => {
@@ -421,8 +421,8 @@ test("a failed streamed generation reports failure with its ID and the legacy re
   t.mock.timers.tick(500);
 
   assert.deepEqual(generationMessages(), [
-    { generation: { id: "g1", state: "thinking" } },
-    { generation: { id: "g1", state: "failed" }, ai_reply: "[Erreur du modèle]" },
+    { generation: { id: "g1", kind: "answer", state: "thinking" } },
+    { generation: { id: "g1", kind: "answer", state: "failed" }, ai_reply: "[Erreur du modèle]" },
   ]);
 });
 
@@ -433,8 +433,8 @@ test("an empty streamed reply is a failure, never a done message", async () => {
   run.resolve("   ");
   await settle();
   assert.deepEqual(generationMessages(), [
-    { generation: { id: "g1", state: "thinking" } },
-    { generation: { id: "g1", state: "failed" }, ai_reply: "[Erreur du modèle]" },
+    { generation: { id: "g1", kind: "answer", state: "thinking" } },
+    { generation: { id: "g1", kind: "answer", state: "failed" }, ai_reply: "[Erreur du modèle]" },
   ]);
 });
 
@@ -475,9 +475,9 @@ test("a capability change applies from the next generation", async () => {
   assert.deepEqual(generationMessages(), [
     { generation: { state: "thinking" } },
     { ai_reply: "One.", model: { selected: "test/model", actual: null } },
-    { generation: { id: "g2", state: "thinking" } },
-    { generation: { id: "g2", state: "streaming" }, delta: "Two." },
-    { ai_reply: "Two.", model: { selected: "test/model", actual: null }, generation: { id: "g2", state: "done" } },
+    { generation: { id: "g2", kind: "answer", state: "thinking" } },
+    { generation: { id: "g2", kind: "answer", state: "streaming" }, delta: "Two." },
+    { ai_reply: "Two.", model: { selected: "test/model", actual: null }, generation: { id: "g2", kind: "answer", state: "done" } },
     { generation: { state: "thinking" } },
     { ai_reply: "Three.", model: { selected: "test/model", actual: null } },
   ]);

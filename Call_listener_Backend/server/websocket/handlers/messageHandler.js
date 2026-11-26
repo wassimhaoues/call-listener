@@ -3,6 +3,10 @@ import {
   parseClientCapabilities,
   requestsSessionResume,
 } from "../../contracts/interviewContext.js";
+import {
+  isCandidateActionFrame,
+  parseCandidateAction,
+} from "../../contracts/candidateAction.js";
 
 export const MAX_AUDIO_CHUNK_BYTES = 64 * 1024;
 export const MAX_TYPED_INTERVIEWER_QUESTION_CHARS = 2_000;
@@ -186,6 +190,20 @@ export function createMessageHandler({
         log.info(`🛑 Session [${sessionId}] ended.`);
         await streamManager.closeAll();
         await onEnd?.();
+        return;
+      }
+
+      if (isCandidateActionFrame(msg)) {
+        const action = parseCandidateAction(msg);
+        if (!action || typeof streamManager.requestAction !== "function") {
+          log.warn(`⚠️ Invalid response action from [${sessionId}]`);
+          sendJson(wsClient, { error: "Invalid message" });
+          return;
+        }
+        // Metadata only: the action type, never suggestion text.
+        log.info(`🎛️ Response action [${action.type}] for [${sessionId}]`);
+        const rejection = await streamManager.requestAction(action, wsClient);
+        if (rejection) sendJson(wsClient, rejection);
         return;
       }
 
