@@ -24,6 +24,7 @@ Use OpenRouter for selectable language models, LangChain for model integration a
 11. [Offline evaluation of live suggestions](evaluation.md)
 12. [Provider retries and request idempotency](provider-retries.md)
 13. [Audio framing: base64 JSON vs binary frames](audio-framing.md)
+14. [Prompt growth, context trimming and prompt caching](prompt-growth.md)
 
 ## Delivery sequence
 
