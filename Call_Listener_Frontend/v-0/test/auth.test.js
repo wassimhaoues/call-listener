@@ -26,9 +26,27 @@ it("persists an opaque installation ID instead of deriving identity from a hostn
   expect(fs.readFileSync(path.join(userDataDir, "installation-id"), "utf8").trim()).toBe(first);
 });
 
-it("returns a cookie-authenticated WebSocket URL without a bearer token", async () => {
+// A server that predates POST /ws-ticket.
+const legacyTicketClient = {
+  request(_options, onResponse) {
+    const handlers = {};
+    const req = {
+      on: () => req,
+      write() {},
+      end() {
+        onResponse({ statusCode: 404, on: (event, handler) => { handlers[event] = handler; } });
+        handlers.data("{}");
+        handlers.end();
+      },
+      destroy() {},
+    };
+    return req;
+  },
+};
+
+it("returns a cookie-authenticated WebSocket URL without a bearer token on an older server", async () => {
   const auth = new AuthManager({
-    requestClient: {},
+    requestClient: legacyTicketClient,
     appId: "com.coworky.calllistener",
     backendHost: "call.example.test",
     electronSession: { cookies: { set: async () => {} } },
@@ -50,7 +68,7 @@ it("requires an explicit installation ID", () => {
 
 it("uses localhost HTTP and WS ports when explicitly configured for development", async () => {
   const auth = new AuthManager({
-    requestClient: {},
+    requestClient: legacyTicketClient,
     appId: "com.coworky.calllistener",
     backendHost: "127.0.0.1",
     backendProtocol: "http",
