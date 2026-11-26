@@ -1,12 +1,22 @@
 import dotenv from "dotenv";
 import { parseModelAllowlist } from "./modelAllowlist.js";
 import { resolveModelPrices } from "./modelPrices.js";
+import { isWsTicketTtl } from "../services/auth/wsTicketStore.js";
 
 dotenv.config({ quiet: true });
 
 const AI_PROVIDER = process.env.AI_PROVIDER || "groq";
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || "openai/gpt-5.6-luna";
 const isDevelopment = process.env.NODE_ENV === "development";
+
+/** Strict boolean env flag: unset uses the default; only "true"/"false" are accepted. */
+function readBooleanFlag(name, defaultValue) {
+  const value = process.env[name];
+  if (value === undefined || value === "") return defaultValue;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${name} must be true or false`);
+}
 const CONFIG = {
   DEEPGRAM_API_KEY: process.env.DEEPGRAM_API_KEY,
   REDIS_URL: process.env.REDIS_URL,
@@ -32,6 +42,11 @@ const CONFIG = {
   RESUME_WINDOW_MS: Number(process.env.RESUME_WINDOW_MS || 120_000),
   AUTH_RATE_LIMIT_PER_MINUTE: Number(process.env.AUTH_RATE_LIMIT_PER_MINUTE || 20),
   TRUST_PROXY_HOPS: Number(process.env.TRUST_PROXY_HOPS || 0),
+  // Single-use WebSocket tickets (POST /ws-ticket).
+  WS_TICKET_TTL_SECONDS: Number(process.env.WS_TICKET_TTL_SECONDS || 30),
+  WS_TICKET_RATE_LIMIT_PER_MINUTE: Number(process.env.WS_TICKET_RATE_LIMIT_PER_MINUTE || 30),
+  // Compatibility: also accept the JWT (cookie or ?token=) on the socket.
+  WS_ALLOW_COOKIE_AUTH: readBooleanFlag("WS_ALLOW_COOKIE_AUTH", true),
   MAX_DISCONNECTED_SESSIONS_PER_OWNER: Number(process.env.MAX_DISCONNECTED_SESSIONS_PER_OWNER || 3),
   OPENROUTER_INPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_INPUT_USD_PER_MILLION_TOKENS || 0.2),
   OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS || 1.2),
@@ -57,7 +72,10 @@ if (AI_PROVIDER === "openrouter") required.push("OPENROUTER_API_KEY");
 if (!new Set(["groq", "openrouter"]).has(AI_PROVIDER)) {
   throw new Error("AI_PROVIDER must be groq or openrouter");
 }
-for (const key of ["AUTH_RATE_LIMIT_PER_MINUTE"]) {
+if (!isWsTicketTtl(CONFIG.WS_TICKET_TTL_SECONDS)) {
+  throw new Error("WS_TICKET_TTL_SECONDS must be an integer between 1 and 300");
+}
+for (const key of ["AUTH_RATE_LIMIT_PER_MINUTE", "WS_TICKET_RATE_LIMIT_PER_MINUTE"]) {
   if (!Number.isInteger(CONFIG[key]) || CONFIG[key] < 1) {
     throw new Error(`${key} must be a positive integer`);
   }

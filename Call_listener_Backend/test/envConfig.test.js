@@ -109,3 +109,33 @@ test("preparation limits have bounded defaults and reject invalid values", async
     /PREPARATION_RATE_LIMIT_PER_MINUTE/
   );
 });
+
+const WS_TICKET_KEYS = ["WS_TICKET_TTL_SECONDS", "WS_TICKET_RATE_LIMIT_PER_MINUTE", "WS_ALLOW_COOKIE_AUTH"];
+
+function loadWsTicketConfig(env) {
+  return execFileAsync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { CONFIG } from ${JSON.stringify(envModuleUrl)}; process.stdout.write(JSON.stringify(${JSON.stringify(WS_TICKET_KEYS)}.map((key) => CONFIG[key])));`,
+    ],
+    { cwd: os.tmpdir(), env: { ...baseEnv, ...env } }
+  );
+}
+
+test("WebSocket ticket settings have compatible defaults and reject invalid values", async () => {
+  const defaults = await loadWsTicketConfig({});
+  assert.deepEqual(JSON.parse(defaults.stdout), [30, 30, true]);
+  const configured = await loadWsTicketConfig({
+    WS_TICKET_TTL_SECONDS: "10",
+    WS_TICKET_RATE_LIMIT_PER_MINUTE: "5",
+    WS_ALLOW_COOKIE_AUTH: "false",
+  });
+  assert.deepEqual(JSON.parse(configured.stdout), [10, 5, false]);
+  for (const value of ["0", "301", "1.5", "soon"]) {
+    await assert.rejects(loadWsTicketConfig({ WS_TICKET_TTL_SECONDS: value }), /WS_TICKET_TTL_SECONDS/);
+  }
+  await assert.rejects(loadWsTicketConfig({ WS_TICKET_RATE_LIMIT_PER_MINUTE: "0" }), /WS_TICKET_RATE_LIMIT_PER_MINUTE/);
+  await assert.rejects(loadWsTicketConfig({ WS_ALLOW_COOKIE_AUTH: "no" }), /WS_ALLOW_COOKIE_AUTH must be true or false/);
+});

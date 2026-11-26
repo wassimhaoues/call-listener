@@ -7,16 +7,20 @@ import { createApp } from "./app.js";
 import { createModelCatalog } from "./services/ai/modelCatalog.js";
 import { createConfiguredPricing } from "./services/ai/modelPricing.js";
 import { createConfiguredPreparationBrief } from "./services/preparation/configuredPreparation.js";
+import { createWsTicketStore } from "./services/auth/wsTicketStore.js";
 import fs from "fs";
 import path from "path";
 const logsDir = path.join(process.cwd(), "logs");
 if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir, { recursive: true });
 
 const log = loggers.core;
+// One store for both servers: Express issues tickets, the socket consumes them.
+const wsTickets = createWsTicketStore({ redisClient: redis, ttlSeconds: CONFIG.WS_TICKET_TTL_SECONDS });
 const wss = startWebSocketServer({
   port: CONFIG.PORT,
   config: CONFIG,
   handleAuthenticatedConnection: handleConnection,
+  wsTickets,
 });
 const modelPricing = createConfiguredPricing(CONFIG, loggers.ai);
 const modelCatalog = createModelCatalog({
@@ -33,7 +37,14 @@ const preparationBrief = createConfiguredPreparationBrief({
   redisClient: redis,
   log: loggers.ai,
 });
-const app = createApp({ redisClient: redis, config: CONFIG, modelCatalog, preparationBrief });
+const app = createApp({
+  redisClient: redis,
+  config: CONFIG,
+  modelCatalog,
+  preparationBrief,
+  wsTickets,
+  log: loggers.core,
+});
 app.listen(CONFIG.EXPRESS_PORT, () => {
   log.info(`🚀 Express server listening on port ${CONFIG.EXPRESS_PORT}`);
 });

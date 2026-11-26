@@ -24,18 +24,23 @@ function parseCookies(header) {
   return out;
 }
 
-function getTokenFromReq(req) {
+function readQuery(req) {
   try {
-    // 1) querystring
-    const url = new URL(req.url, "http://localhost");
-    const token = url.searchParams.get("token");
-    if (token) return token;
+    return new URL(req.url, "http://localhost").searchParams;
+  } catch {
+    return new URLSearchParams();
+  }
+}
 
-    // 2) cookie
+function getTokenFromReq(req, query) {
+  // 1) querystring (legacy clients)
+  const token = query.get("token");
+  if (token) return token;
+
+  // 2) cookie
+  try {
     const cookies = parseCookies(req.headers["cookie"]);
-    if (cookies.call_token) return cookies.call_token;
-
-    return null;
+    return cookies.call_token || null;
   } catch {
     return null;
   }
@@ -54,6 +59,54 @@ function verifyToken(token, config) {
   return payload;
 }
 
+const rejected = (code, reason) => ({ rejected: { code, reason } });
+
+async function authenticateWithTicket(ticket, { config, wsTickets }) {
+  if (!wsTickets) return rejected(4001, "auth_failed");
+  let owner;
+  try {
+    owner = await wsTickets.consume(ticket);
+  } catch (e) {
+    log.warn(`WS ticket check unavailable (${e?.code || "error"})`);
+    return rejected(1011, "auth_unavailable");
+  }
+  if (!owner) {
+    log.warn("WS auth failed: unknown, expired, or reused ticket");
+    return rejected(4001, "auth_failed");
+  }
+  if (owner.app_id !== config.APP_ID) {
+    log.warn("WS auth failed: ticket for another app");
+    return rejected(4001, "auth_failed");
+  }
+  return { user: { device_id: owner.device_id, app_id: owner.app_id } };
+}
+
+function authenticateWithToken(req, query, config) {
+  const token = getTokenFromReq(req, query);
+  if (!token) return rejected(4001, "auth_required");
+  try {
+    const claims = verifyToken(token, config);
+    return { user: { device_id: claims.device_id, app_id: claims.app_id } };
+  } catch (e) {
+    log.warn("WS auth failed: %o", e.message || e);
+    return rejected(4001, "auth_failed");
+  }
+}
+
+/**
+ * Resolve the connection owner. A `?ticket=` is authoritative: when present,
+ * the cookie and `?token=` are ignored, so a bad ticket never falls back to
+ * the long-lived JWT. Without a ticket, the JWT path is used only while
+ * `WS_ALLOW_COOKIE_AUTH` is not false.
+ */
+export async function authenticateUpgrade(req, { config, wsTickets }) {
+  const query = readQuery(req);
+  const ticket = query.get("ticket");
+  if (ticket !== null) return authenticateWithTicket(ticket, { config, wsTickets });
+  if (config.WS_ALLOW_COOKIE_AUTH === false) return rejected(4001, "auth_required");
+  return authenticateWithToken(req, query, config);
+}
+
 /**
  * Start the authenticated WebSocket boundary with explicit runtime dependencies.
  *
@@ -64,30 +117,37 @@ export function startWebSocketServer({
   port = 4000,
   config,
   handleAuthenticatedConnection,
+  wsTickets,
 } = {}) {
   if (!config) throw new TypeError("config is required");
   if (typeof handleAuthenticatedConnection !== "function") {
     throw new TypeError("handleAuthenticatedConnection is required");
   }
 
-  const wss = new WebSocketServer({ port, maxPayload: MAX_WS_MESSAGE_BYTES });
+  // Authentication runs during the handshake (ticket consumption is async), so
+  // no frame can arrive before the connection handler attaches its listeners.
+  // The handshake itself always completes; a rejected connection is then
+  // closed with its documented code and reason.
+  const verifyClient = (info, done) => {
+    authenticateUpgrade(info.req, { config, wsTickets })
+      .catch(() => rejected(4001, "auth_failed"))
+      .then((result) => {
+        info.req.callAuth = result;
+        done(true);
+      });
+  };
+  const wss = new WebSocketServer({ port, maxPayload: MAX_WS_MESSAGE_BYTES, verifyClient });
   log.info(`🚀 WebSocket server listening on port ${port}`);
 
   wss.on("connection", (wsClient, req) => {
-    // 🔒 AUTH
-    try {
-      const token = getTokenFromReq(req);
-      if (!token) {
-        wsClient.close(4001, "auth_required");
-        return;
-      }
-      const claims = verifyToken(token, config);
-      wsClient.user = { device_id: claims.device_id, app_id: claims.app_id };
-    } catch (e) {
-      log.warn("WS auth failed: %o", e.message || e);
-      wsClient.close(4001, "auth_failed");
+    const auth = req.callAuth;
+    delete req.callAuth;
+    if (!auth?.user) {
+      const { code, reason } = auth?.rejected ?? { code: 4001, reason: "auth_failed" };
+      wsClient.close(code, reason);
       return;
     }
+    wsClient.user = auth.user;
 
     wsClient.isAlive = true;
     wsClient.on("pong", heartbeat);
