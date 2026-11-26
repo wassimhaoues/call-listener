@@ -26,6 +26,7 @@ services:
       REDIS_URL: redis://default:${REDIS_PASSWORD}@redis:6379
       PORT: ${PORT:-4000}           # WS inside container
       EXPRESS_PORT: ${EXPRESS_PORT:-3000}  # HTTP inside container
+      TRUST_PROXY_HOPS: "1"            # Traefik is the single trusted proxy hop
     expose:
       - "3000"
       - "4000"

@@ -1,6 +1,7 @@
 import express from "express";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
+import { createFixedWindowLimiter } from "./core/rateLimit.js";
 
 /**
  * Create the HTTP API with explicit runtime dependencies.
@@ -15,6 +16,16 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief 
   if (!config) throw new TypeError("config is required");
 
   const app = express();
+  // Behind a reverse proxy (Traefik), trust exactly that many hops so req.ip
+  // is the client, not the proxy. 0 (default) trusts none.
+  const trustProxyHops = Number(config.TRUST_PROXY_HOPS ?? 0);
+  if (trustProxyHops > 0) app.set("trust proxy", trustProxyHops);
+  const authTokenLimiter = createFixedWindowLimiter({
+    redisClient,
+    prefix: "rl:auth-token",
+    limit: Number(config.AUTH_RATE_LIMIT_PER_MINUTE ?? 20),
+    windowSeconds: 60,
+  });
   // Candidate contexts can exceed the 100 kB default; only this route gets more.
   app.use("/preparation", express.json({ limit: PREPARATION_BODY_LIMIT }));
   app.use(express.json());
@@ -31,7 +42,7 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief 
       redis: redisStatus,
     });
   });
-  app.post("/auth/token", (req, res) => {
+  app.post("/auth/token", authTokenLimiter, (req, res) => {
     try {
       const { app_id, device_id } = req.body || {};
       if (app_id !== config.APP_ID) {
