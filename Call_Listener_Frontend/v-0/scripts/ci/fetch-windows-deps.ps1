@@ -16,7 +16,11 @@ $deps = @(
   @{
     Name   = "SoundVolumeView"
     Url    = "https://www.nirsoft.net/utils/soundvolumeview-x64.zip"
-    Sha256 = @("11d4695f42ad24f228e9682c7307df39d93bc0fe5b8f8ac4ed560a54e7eb0509")
+    Sha256 = @(
+      "11d4695f42ad24f228e9682c7307df39d93bc0fe5b8f8ac4ed560a54e7eb0509",
+      # Reviewed and approved 2026-11-26 (upstream re-release at the same URL).
+      "ee2c45553fb9fb31b71db88b537c18e25c1a387a4a9009d081bdb38265c68e1f"
+    )
     Dest   = "."
   },
   @{
