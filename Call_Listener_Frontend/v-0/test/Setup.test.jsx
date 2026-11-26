@@ -202,13 +202,27 @@ it("explains when no monitor source is found", async () => {
   expect(localStorage.getItem("systemAudioEnabled")).toBe("false");
 });
 
+it("preselects the source the app added, keeps an explicit None across refresh", async () => {
+  const appSource = { kind: "audioinput", deviceId: "cl-1", label: "Monitor of system output (Call Listener)" };
+  setupLinux({ enumerations: [[MIC, MONITOR, appSource]] });
+
+  await screen.findByRole("option", { name: "Monitor of system output (Call Listener)" });
+  expect(interviewerSelect()).toHaveValue("cl-1");
+  expect(screen.getByText(/Call Listener added this source when it started/)).toBeInTheDocument();
+
+  fireEvent.change(interviewerSelect(), { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await screen.findByRole("option", { name: "Monitor of system output (Call Listener)" });
+  expect(interviewerSelect()).toHaveValue("");
+});
+
 it("offers no add-source button without the main-process API", async () => {
   setupLinux({ enumerations: [[MIC]] });
   await screen.findByText(/No system output monitor sources are visible/);
   expect(screen.queryByRole("button", { name: "Add system output source" })).toBeNull();
 });
 
-it("adds a system output source on request and lists it without selecting it", async () => {
+it("adds a system output source on request and selects it", async () => {
   const added = { kind: "audioinput", deviceId: "cl-1", label: "Monitor of system output (Call Listener)" };
   const createInterviewerSource = vi.fn().mockResolvedValue({ ok: true });
   setupLinux({ enumerations: [[MIC], [MIC, added]], createInterviewerSource });
@@ -217,7 +231,7 @@ it("adds a system output source on request and lists it without selecting it", a
 
   await screen.findByRole("option", { name: "Monitor of system output (Call Listener)" });
   expect(createInterviewerSource).toHaveBeenCalledTimes(1);
-  expect(interviewerSelect()).toHaveValue("");
+  expect(interviewerSelect()).toHaveValue("cl-1");
   expect(screen.queryByRole("button", { name: "Add system output source" })).toBeNull();
 });
 

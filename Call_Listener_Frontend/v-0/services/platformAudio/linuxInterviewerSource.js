@@ -2,7 +2,7 @@
 //
 // Chromium's PulseAudio backend hides real monitor sources, so on a stock
 // PipeWire/PulseAudio desktop the app cannot see "Monitor of <speakers>".
-// On an explicit candidate action this module loads one module-remap-source
+// At app startup (and again on request) this module loads one module-remap-source
 // that mirrors the monitor of the current default output. The sound server
 // lists it as an ordinary input, so Setup can offer it as interviewer audio.
 //

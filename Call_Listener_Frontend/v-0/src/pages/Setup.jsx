@@ -5,6 +5,7 @@ import { useUI } from "@/ui/UIContext.jsx";
 import Button from "@/components/ui/Button.jsx";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card.jsx";
 import InterviewerSourcePicker, {
+  APP_SOURCE_LABEL,
   NO_INTERVIEWER_SOURCE,
 } from "@/components/InterviewerSourcePicker.jsx";
 import { hasDeviceLabels, partitionAudioInputs } from "@/services/monitorSources.js";
@@ -53,6 +54,8 @@ export default function Setup() {
     strategy: "vb-cable",
   });
   const mountedRef = useRef(true);
+  // An explicit "None" survives a refresh instead of being preselected again.
+  const userChoseNoneRef = useRef(false);
   const monitorMode = systemAudio.selectableSource === MONITOR_SOURCE;
   const vbMode = !monitorMode && systemAudio.supported;
   // Navigate away if we're offline; also react to going offline while on this page.
@@ -96,9 +99,12 @@ export default function Setup() {
       setMicId((current) =>
         microphones.some((d) => d.deviceId === current) ? current : microphones[0]?.deviceId || ""
       );
-      setSysId((current) =>
-        found.some((d) => d.deviceId === current) ? current : NO_INTERVIEWER_SOURCE
-      );
+      const appSource = found.find((d) => d.label === APP_SOURCE_LABEL);
+      setSysId((current) => {
+        if (current === NO_INTERVIEWER_SOURCE && userChoseNoneRef.current) return current;
+        if (found.some((d) => d.deviceId === current)) return current;
+        return appSource?.deviceId || NO_INTERVIEWER_SOURCE;
+      });
       setMonitorScan(denied ? "denied" : "ready");
       return found.length;
     } catch {
@@ -145,7 +151,7 @@ export default function Setup() {
       if (capabilities?.systemAudio) setSystemAudio(capabilities.systemAudio);
 
       if (capabilities?.systemAudio?.selectableSource === MONITOR_SOURCE) {
-        // Never restore a saved monitor: the candidate picks it on each visit.
+        // Never restore a saved monitor. Only the app's own source is preselected.
         setSysId(NO_INTERVIEWER_SOURCE);
         await refreshLinuxDevices();
         return;
@@ -303,7 +309,10 @@ export default function Setup() {
               <InterviewerSourcePicker
                 monitors={monitors}
                 value={sysId}
-                onChange={setSysId}
+                onChange={(id) => {
+                  userChoseNoneRef.current = id === NO_INTERVIEWER_SOURCE;
+                  setSysId(id);
+                }}
                 labelsVisible={labelsVisible}
                 scan={monitorScan}
                 onAllowAccess={() => refreshLinuxDevices({ requestPermission: true })}

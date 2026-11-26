@@ -4,10 +4,13 @@
 // changes. The adapter owns only streams the app itself registers
 // (trackStream) and stops exactly those on disable/exit.
 //
-// The one sound-server change is opt-in: on an explicit candidate action,
-// createInterviewerSource() adds a remapped monitor of the default output
-// (see linuxInterviewerSource.js) so Chromium can list it. That source is
-// removed on exit, and any copy left by a crash is removed at startup.
+// The one sound-server change: at startup (ensureReady) the adapter adds a
+// remapped monitor of the default output (see linuxInterviewerSource.js) so
+// Chromium can list it as interviewer audio, the way the Windows installer
+// provides VB-Cable. It never changes the default devices, it is removed on
+// exit, and any copy left by a crash is removed first. createInterviewerSource()
+// re-creates it on request (for example after the default output changed).
+// Failure never blocks startup: the candidate can still type questions.
 //
 // Until L2 (PipeWire desktop capture) is qualified it reports microphone-only
 // capture regardless of what the capability probe says about PipeWire.
@@ -18,6 +21,7 @@ function createLinuxAudioAdapter({ logger = console, interviewerSource } = {}) {
   const streams = new Map(); // id -> { stop }
   let state = "idle"; // idle | prepared | ready | exited
   let lastError = null;
+  let sourceStatus = null; // null until tried, then "ready" or an error code
 
   const stopAll = () => {
     let stopped = 0;
@@ -47,14 +51,21 @@ function createLinuxAudioAdapter({ logger = console, interviewerSource } = {}) {
       return { ok: true };
     },
 
-    /** Explicit candidate action only. Resolves { ok, label } | { ok: false, code }. */
+    /** Re-create on request. Resolves { ok, label } | { ok: false, code }. */
     async createInterviewerSource() {
       if (state === "exited") return { ok: false, code: "exited" };
-      return remap.create();
+      const result = await remap.create();
+      sourceStatus = result?.ok ? "ready" : result?.code || "failed";
+      return result;
     },
 
     async ensureReady() {
-      if (state !== "exited") state = "ready";
+      if (state === "exited") return { status: "ready" };
+      state = "ready";
+      if (sourceStatus === null) {
+        const result = await remap.create();
+        sourceStatus = result?.ok ? "ready" : result?.code || "failed";
+      }
       return { status: "ready" };
     },
 
@@ -121,6 +132,7 @@ function createLinuxAudioAdapter({ logger = console, interviewerSource } = {}) {
         routingActive: false,
         activeStreams: streams.size,
         lastErrorCode: lastError?.code || null,
+        interviewerSource: sourceStatus,
       };
     },
   };

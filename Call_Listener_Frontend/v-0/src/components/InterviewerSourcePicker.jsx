@@ -3,6 +3,8 @@ import React from "react";
 import Button from "@/components/ui/Button.jsx";
 
 export const NO_INTERVIEWER_SOURCE = "";
+// Label of the source the app adds itself on Linux (linuxInterviewerSource.js).
+export const APP_SOURCE_LABEL = "Monitor of system output (Call Listener)";
 
 function ScanMessage({ scan, labelsVisible, monitorCount }) {
   if (scan === "scanning") {
@@ -147,6 +149,14 @@ export default function InterviewerSourcePicker({
             ))}
           </select>
         </label>
+      )}
+
+      {showPicker && monitors.find((d) => d.deviceId === value)?.label === APP_SOURCE_LABEL && (
+        <p className="text-sm text-[var(--text-2)]">
+          Call Listener added this source when it started. It mirrors your
+          default speakers or headset, so play the call there. Your default
+          devices are unchanged, and the source is removed when you quit.
+        </p>
       )}
     </section>
   );
