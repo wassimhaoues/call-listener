@@ -19,6 +19,7 @@ const { execFileSync, spawn } = require("node:child_process");
 // locating an unpacked watchdog, then falls back to the source watchdog.js.
 if (!process.resourcesPath) process.resourcesPath = os.tmpdir();
 const { AudioRouteManager } = require("../../services/audio.js");
+const { createWindowsAudioAdapter } = require("../../services/platformAudio/windowsAdapter.js");
 const { parseCsvLine } = require("../../utils/csv.js");
 
 const LISTEN_PROPERTY = "{24dbb0fc-9311-4b3d-9cf0-18ff155639d4},1";
@@ -165,6 +166,60 @@ async function main() {
     assert.equal(fs.existsSync(statePath), false);
     const listenAfter = readListenState();
     if (listenAfter !== null) assert.equal(listenAfter, false);
+  });
+
+  // --- Platform adapter (the layer main.js uses: startup, tray, power) -------
+  const adapterDir = fs.mkdtempSync(path.join(os.tmpdir(), "call-listener-adapter-"));
+  const adapter = createWindowsAudioAdapter({
+    logger: console,
+    ensureTools: async () => svvPath,
+    createManager: (resolvedSvv) =>
+      new AudioRouteManager({ svvPath: resolvedSvv, vbCableInstaller: "", userDataDir: adapterDir, logger: console }),
+  });
+
+  await scenario("adapter startup prepares and activates routing", async () => {
+    assert.deepEqual(await adapter.prepare(), { ok: true });
+    assert.deepEqual(await adapter.ensureReady(), { status: "ready" });
+    assert.equal(adapter.isRoutingActive(), true);
+    await waitFor(() => readListenState() === true, 15000, "listen on after startup");
+    assert.equal(adapter.describe().state, "ready");
+  });
+
+  await scenario("suspend disables listen and resume restores it", async () => {
+    await adapter.onSuspend();
+    await waitFor(() => readListenState() === false, 15000, "listen off after suspend");
+    assert.equal(adapter.isRoutingActive(), false);
+    await adapter.onResume();
+    await waitFor(() => readListenState() === true, 15000, "listen on after resume");
+    assert.equal(adapter.isRoutingActive(), true);
+  });
+
+  await scenario("repeated tray toggles are idempotent", async () => {
+    assert.deepEqual(await adapter.disableRouting(), { changed: true });
+    assert.deepEqual(await adapter.disableRouting(), { changed: false, reason: "already-inactive" });
+    assert.equal(readListenState(), false);
+    assert.deepEqual(await adapter.enableRouting(), { changed: true });
+    assert.deepEqual(await adapter.enableRouting(), { changed: false, reason: "already-active" });
+    assert.equal(readListenState(), true);
+  });
+
+  await scenario("overlapping suspend/resume calls are serialized", async () => {
+    await Promise.all([adapter.onSuspend(), adapter.onResume(), adapter.onSuspend()]);
+    // The last queued change wins: routing ends disabled, with no error state.
+    await waitFor(() => readListenState() === false, 15000, "listen off after serialized changes");
+    assert.equal(adapter.isRoutingActive(), false);
+    assert.equal(adapter.describe().lastErrorCode, null);
+    await adapter.onResume();
+    await waitFor(() => readListenState() === true, 15000, "listen on before exit");
+  });
+
+  await scenario("adapter exit restores once and refuses to re-enable", async () => {
+    await Promise.all([adapter.gracefulExit(), adapter.gracefulExit()]);
+    await waitFor(() => readListenState() === false, 15000, "listen off after exit");
+    assert.equal(fs.existsSync(path.join(adapterDir, "audio_state.json")), false, "state cleared");
+    assert.equal(await mgr._getDefaultRenderCmdId(), originalDefault);
+    assert.deepEqual(await adapter.enableRouting(), { changed: false, reason: "exited" });
+    assert.equal(readListenState(), false);
   });
 
   fs.writeFileSync(path.join(outDir, "results.json"), JSON.stringify(results, null, 2));
