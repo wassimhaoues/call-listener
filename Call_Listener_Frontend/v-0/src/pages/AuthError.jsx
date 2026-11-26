@@ -40,6 +40,11 @@ const COPY = {
     body: "The Call Listener server returned an error while signing in. Try again in a moment.",
     tips: ["If the problem persists, the service may be under maintenance."],
   },
+  revoked: {
+    title: "This installation has been disabled",
+    body: "The Call Listener service has disabled this installation, so it can no longer sign in. Contact support if you think this is a mistake.",
+    tips: ["Retrying will not help until support re-enables this installation."],
+  },
 };
 
 export function authErrorCopy(reason) {

@@ -296,3 +296,46 @@ describe("useInterviewSocket reconnection", () => {
     await flush();
   });
 });
+
+describe("useInterviewSocket revoked installation", () => {
+  it("stops on close code 4003 without reconnecting", async () => {
+    const { result, dispatch, getWsUrl } = setup();
+    const ws = await liveSession(result);
+    dispatch.mockClear();
+
+    act(() => ws.serverClose(4003));
+    expect(dispatched(dispatch)).toEqual([connectionChanged(CONNECTION.REVOKED)]);
+
+    await advance(60_000);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+    expect(getWsUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops reconnecting when the ticket request reports device_revoked", async () => {
+    const { result, dispatch, getWsUrl } = setup();
+    const ws = await liveSession(result);
+    getWsUrl.mockRejectedValue(new Error("Error invoking remote method 'auth:getWsUrl': Error: device_revoked"));
+    dispatch.mockClear();
+
+    act(() => ws.serverClose());
+    await advance(500);
+    expect(dispatched(dispatch)).toEqual([
+      connectionChanged(CONNECTION.RECONNECTING),
+      connectionChanged(CONNECTION.REVOKED),
+    ]);
+
+    await advance(60_000);
+    expect(getWsUrl).toHaveBeenCalledTimes(2);
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("reports a revoked first connection instead of a generic failure", async () => {
+    const getWsUrl = vi.fn(async () => {
+      throw new Error("device_revoked");
+    });
+    const { result, dispatch } = setup({ getWsUrl });
+
+    await act(() => result.current.connect());
+    expect(dispatched(dispatch)).toEqual([connectionChanged(CONNECTION.REVOKED)]);
+  });
+});

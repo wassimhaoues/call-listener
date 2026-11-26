@@ -42,9 +42,9 @@ export class FakeWebSocket {
     this.onmessage?.({ data: typeof data === "string" ? data : JSON.stringify(data) });
   }
 
-  serverClose() {
+  serverClose(code) {
     this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.(code === undefined ? undefined : { code });
   }
 
   static latest() {

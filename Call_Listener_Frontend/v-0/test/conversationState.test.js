@@ -280,3 +280,15 @@ describe("conversationReducer", () => {
     expect(before).toEqual(snapshot);
   });
 });
+
+describe("revoked installation", () => {
+  it("shows a terminal status and drops an in-flight generation", () => {
+    const state = reduce(
+      [server({ generation: { id: "g1", state: "thinking" } }), connectionChanged(CONNECTION.REVOKED)],
+      live()
+    );
+    expect(state.status).toBe(STATUS.DEVICE_REVOKED);
+    expect(state.connection).toBe(CONNECTION.REVOKED);
+    expect(state.finalGenerationId).toBeNull();
+  });
+});
