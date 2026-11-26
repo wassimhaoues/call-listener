@@ -71,7 +71,8 @@ export function renderMarkdown(report) {
   const lines = [
     "# Live-suggestion evaluation",
     "",
-    `Generated ${report.generatedAt} by harness v${report.harnessVersion}.`,
+    `Generated ${report.generatedAt} by harness v${report.harnessVersion}` +
+      (report.promptVersion ? ` with live prompts ${report.promptVersion}.` : "."),
     "",
     `- Provider: ${report.provider}; model: \`${report.model}\``,
     `- Prices (USD per million tokens): input ${report.prices.inputUsdPerMillion}, output ${report.prices.outputUsdPerMillion}; output cap ${report.maxOutputTokens} tokens`,

@@ -1,6 +1,6 @@
 # Offline Evaluation of Live Suggestions
 
-This harness supports the Phase 4 roadmap item "Evaluate graph output against a simple interview-aware LangChain chain on identical fixtures". It runs the production LangGraph path and a single-prompt baseline over the same synthetic interview questions, scores every answer with deterministic checks, and writes a comparison report. **By default it costs nothing**: the default provider is a deterministic fake, and a paid run needs three explicit opt-ins (see [cost guard](#cost-guard)).
+This harness supports the Phase 4 roadmap item "Evaluate graph output against a simple interview-aware LangChain chain on identical fixtures". It runs the production LangGraph path and a single-prompt baseline over the same synthetic interview questions, scores every answer with deterministic checks, and writes a comparison report. Reports record the harness version and the live prompt version (`PROMPT_VERSION`), so results from different templates are never compared by accident. **By default it costs nothing**: the default provider is a deterministic fake, and a paid run needs three explicit opt-ins (see [cost guard](#cost-guard)).
 
 The checks are proxies. They do not replace the human usefulness review in [validation and rollout](05-validation-and-rollout.md#quality-evaluation) (at least 90% of sampled answers judged useful against a written rubric). An LLM-as-judge is out of scope.
 

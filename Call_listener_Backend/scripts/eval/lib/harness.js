@@ -4,6 +4,7 @@ import { toInterviewContext } from "./fixtures.js";
 import { aggregateVariant, failedChecks, scoreAnswer } from "./metrics.js";
 import { createHangingReplyGenerator, FAKE_MODEL_ID } from "./providers.js";
 import { createVariant } from "./variants.js";
+import { PROMPT_VERSION } from "../../../server/services/ai/promptBuilder.js";
 
 export const HARNESS_VERSION = 1;
 
@@ -304,6 +305,7 @@ export async function runEvaluation({
 
   return {
     harnessVersion: HARNESS_VERSION,
+    promptVersion: PROMPT_VERSION,
     generatedAt: clock().toISOString(),
     provider: providerConfig.provider,
     model: providerConfig.live ? providerConfig.model : FAKE_MODEL_ID,

@@ -4,6 +4,15 @@ import { fallbackEvidence, MAX_PROMPT_EVIDENCE } from "../interview/evidenceSele
 
 const log = loggers.ai;
 
+/**
+ * Version of the live-suggestion prompt templates (intro, reply, and the
+ * response actions, candidate and legacy contexts). Bump it whenever any
+ * template text changes, so evaluation reports and logs say which prompts
+ * produced them. `test/promptVersion.test.js` fails when the rendered
+ * templates change without a bump.
+ */
+export const PROMPT_VERSION = "2026-11-26.1";
+
 // Bounds for text quoted into action prompts. Typed questions are capped at
 // 2,000 characters on input; answers are capped well above the output limit.
 export const MAX_PROMPT_QUESTION_CHARS = 2_000;
