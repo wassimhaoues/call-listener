@@ -407,6 +407,14 @@ describe("Linux interviewer source", () => {
     expect(findPactl(() => false)).toBeNull();
   });
 
+  it("still starts when the source cannot be created", async () => {
+    const remap = fakeRemap({ ok: false, code: "pactl-unavailable" });
+    const adapter = createLinuxAudioAdapter({ logger: silentLogger, interviewerSource: remap });
+    await adapter.prepare();
+    expect(await adapter.ensureReady()).toEqual({ status: "ready" });
+    expect(adapter.describe().interviewerSource).toBe("pactl-unavailable");
+  });
+
   it("refuses an unsafe sink name and reports a missing pactl by code", async () => {
     const unsafe = fakePactl({ sink: 'evil" source_name=x' });
     expect(await createLinuxInterviewerSource({ run: unsafe.run, logger: silentLogger }).create()).toEqual({
@@ -421,13 +429,18 @@ describe("Linux interviewer source", () => {
     expect(await source.remove()).toEqual({ ok: false, code: "pactl-unavailable" });
   });
 
-  it("is created only on request and removed at startup and on exit", async () => {
+  it("is created once at startup, re-created on request, and removed on exit", async () => {
     const remap = fakeRemap();
     const adapter = createLinuxAudioAdapter({ logger: silentLogger, interviewerSource: remap });
     await adapter.prepare();
     expect(remap.remove).toHaveBeenCalledTimes(1);
     expect(remap.create).not.toHaveBeenCalled();
+    expect(await adapter.ensureReady()).toEqual({ status: "ready" });
+    expect(await adapter.ensureReady()).toEqual({ status: "ready" });
+    expect(remap.create).toHaveBeenCalledTimes(1);
+    expect(adapter.describe().interviewerSource).toBe("ready");
     expect(await adapter.createInterviewerSource()).toMatchObject({ ok: true });
+    expect(remap.create).toHaveBeenCalledTimes(2);
     await adapter.gracefulExit();
     await adapter.gracefulExit();
     expect(remap.remove).toHaveBeenCalledTimes(2);
