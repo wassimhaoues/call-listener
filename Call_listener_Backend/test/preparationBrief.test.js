@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildPreparationPrompt,
+  clampText,
   createPreparationBriefService,
   evidenceCatalog,
   parsePreparationBrief,
@@ -128,14 +129,76 @@ test("brief parsing validates bounds, filters unknown evidence IDs, and drops un
 
   assert.equal(parsePreparationBrief("not json", allowed).ok, false);
   assert.equal(parsePreparationBrief(JSON.stringify({ introduction: "x" }), allowed).ok, false);
-  assert.equal(
-    parsePreparationBrief(JSON.stringify(validBrief({ practiceTopics: Array(9).fill("topic") })), allowed).ok,
-    false
-  );
-  assert.equal(
-    parsePreparationBrief(JSON.stringify(validBrief({ introduction: "x".repeat(1_501) })), allowed).ok,
-    false
-  );
+  assert.equal(parsePreparationBrief(JSON.stringify(validBrief({ introduction: 42 })), allowed).ok, false);
+  const missingField = validBrief();
+  delete missingField.questionsToAsk;
+  const rejected = parsePreparationBrief(JSON.stringify(missingField), allowed);
+  assert.equal(rejected.ok, false);
+  assert.deepEqual(rejected.paths, ["questionsToAsk (invalid_type)"]);
+});
+
+test("brief parsing trims over-long strings and lists instead of rejecting the whole brief", () => {
+  const allowed = ["A1", "A2", "E1"];
+  const verbose = validBrief({
+    introduction: "word ".repeat(400),
+    practiceTopics: Array(9).fill("topic"),
+    starExamples: Array(6).fill({ ...validBrief().starExamples[0], action: "step ".repeat(300) }),
+  });
+  const parsed = parsePreparationBrief(JSON.stringify(verbose), allowed);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.brief.practiceTopics.length, 8);
+  assert.equal(parsed.brief.starExamples.length, 5);
+  assert.ok(parsed.brief.introduction.length <= 1_500);
+  assert.match(parsed.brief.introduction, /word…$/);
+  assert.ok(parsed.brief.starExamples.every((example) => example.action.length <= 800));
+});
+
+test("clampText keeps short text and cuts long text at a word boundary", () => {
+  assert.equal(clampText("short", 10), "short");
+  assert.equal(clampText("alpha beta gamma", 12), "alpha beta…");
+  assert.equal(clampText("x".repeat(20), 10), `${"x".repeat(9)}…`);
+});
+
+test("a brief cut off at the output cap is repaired with a shorter-brief request, logging no text", async () => {
+  const calls = [];
+  const answers = ['{"introduction": "SECRET CANDIDATE TEXT', JSON.stringify(validBrief())];
+  const generateReply = async (system, user, options) => {
+    calls.push({ user });
+    const text = answers.shift();
+    options.onFinish?.({ truncated: calls.length === 1 });
+    return text;
+  };
+  const logs = [];
+  const log = { info: (message) => logs.push(message), warn: (message) => logs.push(message) };
+  const service = createPreparationBriefService({ generateReply, limits: fakeLimits(), log });
+
+  const result = await service.generate({ context: sampleContext() }, { deviceId: "device-1" });
+
+  assert.equal(result.brief.introduction, validBrief().introduction);
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].user, /cut off at the output length limit/);
+  assert.doesNotMatch(calls[1].user, /SECRET CANDIDATE TEXT/);
+  assert.ok(logs.some((message) => /cut off at the output limit/.test(message)));
+  assert.ok(logs.every((message) => !/SECRET/.test(message)));
+});
+
+test("a failed repair is logged with field paths only", async () => {
+  const broken = validBrief();
+  delete broken.introduction;
+  const { generateReply } = scriptedGenerator(["oops", JSON.stringify({ ...broken, practiceTopics: "SECRET" })]);
+  const logs = [];
+  const log = { info: (message) => logs.push(message), warn: (message) => logs.push(message) };
+  const service = createPreparationBriefService({ generateReply, limits: fakeLimits(), log });
+  await assert.rejects(service.generate({ context: sampleContext() }, { deviceId: "device-1" }), {
+    code: "preparation_failed",
+  });
+  assert.ok(logs.some((message) => /not a JSON object/.test(message)));
+  assert.ok(logs.some((message) => /repair invalid \(schema: introduction \(invalid_type\)/.test(message)));
+  assert.ok(logs.every((message) => !/SECRET/.test(message)));
+});
+
+test("brief parsing still defaults missingEvidence", () => {
+  const allowed = ["A1"];
   const withoutMissing = validBrief();
   delete withoutMissing.missingEvidence;
   assert.deepEqual(parsePreparationBrief(JSON.stringify(withoutMissing), allowed).brief.missingEvidence, []);
