@@ -117,3 +117,63 @@ it("fetches the model catalog with the main-process cookie and returns only cata
     headers: { Cookie: "call_token=main-process-only-token" },
   });
 });
+
+// A request client whose server accepts the request but never answers.
+function makeHangingRequestClient() {
+  const requests = [];
+  return {
+    requests,
+    request(options) {
+      const req = {
+        options,
+        destroyedWith: undefined,
+        on() {
+          return req;
+        },
+        write() {},
+        end() {},
+        destroy(err) {
+          req.destroyedWith = err;
+        },
+      };
+      requests.push(req);
+      return req;
+    },
+  };
+}
+
+const makeAuth = (requestClient, extra = {}) =>
+  new AuthManager({
+    requestClient,
+    appId: "com.coworky.calllistener",
+    backendHost: "call.example.test",
+    electronSession: { cookies: { set: async () => {} } },
+    deviceId: "44d8a725-37db-4cc2-82ed-6d9e23c0db98",
+    ...extra,
+  });
+
+it("bounds the startup token request and classifies the timeout", async () => {
+  const { classifyAuthFailure, AUTH_FAILURE } = require("../services/authFailure.js");
+  const { AUTH_REQUEST_TIMEOUT_MS } = require("../services/auth.js");
+  expect(AUTH_REQUEST_TIMEOUT_MS).toBe(10_000);
+
+  const requestClient = makeHangingRequestClient();
+  const auth = makeAuth(requestClient, { requestTimeoutMs: 20 });
+
+  const error = await auth.ensure().catch((e) => e);
+  expect(error).toBeInstanceOf(Error);
+  expect(error.code).toBe("ETIMEDOUT");
+  expect(requestClient.requests[0].destroyedWith).toBe(error);
+  expect(auth.token).toBeNull();
+  expect(classifyAuthFailure(error, { online: true })).toBe(AUTH_FAILURE.SERVER_UNREACHABLE);
+  expect(classifyAuthFailure(error, { online: false })).toBe(AUTH_FAILURE.OFFLINE);
+});
+
+it("bounds the model catalog request even when the socket never idles out", async () => {
+  const requestClient = makeHangingRequestClient();
+  const auth = makeAuth(requestClient);
+  auth.token = "main-process-only-token";
+
+  await expect(auth.fetchModels({ timeoutMs: 20 })).rejects.toMatchObject({ code: "ETIMEDOUT" });
+  expect(requestClient.requests[0].destroyedWith?.code).toBe("ETIMEDOUT");
+});

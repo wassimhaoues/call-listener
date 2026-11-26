@@ -25,7 +25,8 @@ function classifyAuthFailure(error, { online = true } = {}) {
   if (Number.isInteger(error?.statusCode)) return AUTH_FAILURE.HTTP;
   const code = typeof error?.code === "string" ? error.code : "";
   if (TLS_ERROR_CODE.test(code)) return AUTH_FAILURE.TLS;
-  // DNS failures, refused/reset connections, timeouts, malformed responses:
+  // DNS failures, refused/reset connections, timeouts (including AuthManager's
+  // own ETIMEDOUT deadline), malformed responses:
   // the network is up, but the server could not be used.
   return AUTH_FAILURE.SERVER_UNREACHABLE;
 }
