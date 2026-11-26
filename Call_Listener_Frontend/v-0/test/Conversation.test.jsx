@@ -41,7 +41,7 @@ beforeEach(() => {
   localStorage.setItem("systemAudioEnabled", "false");
   localStorage.setItem(
     "callContext",
-    JSON.stringify({ version: 1, evidence: [{ requirement: "Redis", evidence: "Led a Redis migration" }] })
+    JSON.stringify({ version: 1, candidate: { name: "Ada" }, jobOffer: { title: "Engineer" }, evidence: [{ requirement: "Redis", evidence: "Led a Redis migration" }] })
   );
 });
 
@@ -59,6 +59,8 @@ it("composes capture, socket, and guidance state into the live workspace", async
     {
       context: {
         version: 1,
+        candidate: { name: "Ada" },
+        jobOffer: { title: "Engineer" },
         evidence: [{ requirement: "Redis", evidence: "Led a Redis migration" }],
         capabilities: ["stream", "resume", "debrief", "interim"],
       },
@@ -290,4 +292,25 @@ it("reports an active interview to the main process while capturing, and clears 
   });
   expect(screen.getByText("Setup page")).toBeInTheDocument();
   expect(setInterviewActive).toHaveBeenLastCalledWith(false);
+});
+
+it("sends the candidate to the Context page instead of starting without a usable context", async () => {
+  localStorage.setItem("callContext", "{corrupted");
+  const alert = vi.fn();
+  vi.stubGlobal("alert", alert);
+  render(
+    <MemoryRouter initialEntries={["/conversation"]}>
+      <UIProvider>
+        <Routes>
+          <Route path="/context" element={<p>Context page</p>} />
+          <Route path="/conversation" element={<Conversation />} />
+        </Routes>
+      </UIProvider>
+    </MemoryRouter>
+  );
+  await act(async () => {});
+  expect(screen.getByText("Context page")).toBeInTheDocument();
+  expect(alert).toHaveBeenCalledWith(expect.stringMatching(/profile and the job offer/));
+  expect(FakeWebSocket.instances).toHaveLength(0);
+  expect(audio.streams).toHaveLength(0);
 });

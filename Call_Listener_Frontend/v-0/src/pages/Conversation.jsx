@@ -45,14 +45,11 @@ import {
   debriefFileName,
   downloadMarkdown,
 } from "@/services/debriefMarkdown.js";
+import { readStoredContext, storedContextError } from "@/services/storedContext.js";
 
 const SYSTEM_AUDIO_LOST_TEXT =
   "Interviewer audio (system output) was disconnected, so it is no longer captured. Type the interviewer's questions below; your microphone is still active.";
 
-function readStoredContext() {
-  const context = localStorage.getItem("callContext");
-  return context ? JSON.parse(context) : undefined;
-}
 
 export default function Conversation() {
   const nav = useNavigate();
@@ -194,8 +191,8 @@ export default function Conversation() {
 
   useEffect(() => {
     try {
-      const context = JSON.parse(localStorage.getItem("callContext") || "null");
-      setEvidenceReferences(context?.evidence || []);
+      const context = readStoredContext();
+      setEvidenceReferences(Array.isArray(context?.evidence) ? context.evidence : []);
     } catch {}
   }, []);
 
@@ -261,6 +258,15 @@ export default function Conversation() {
     if (selectionError) {
       alert(selectionError);
       nav("/");
+      return undefined;
+    }
+    // Re-entry (Retry after an error, a reload) can land here without a
+    // usable saved context: send the candidate to prepare one instead of
+    // starting a session that has nothing to ground guidance in.
+    const contextError = storedContextError(readStoredContext());
+    if (contextError) {
+      alert(contextError);
+      nav("/context");
       return undefined;
     }
 

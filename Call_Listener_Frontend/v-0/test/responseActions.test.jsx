@@ -233,7 +233,7 @@ describe("Conversation response actions", () => {
     window.callApi = { getWsUrl: vi.fn(async () => "wss://example.test/ws") };
     localStorage.setItem("micId", "mic-1");
     localStorage.setItem("systemAudioEnabled", "false");
-    localStorage.setItem("callContext", JSON.stringify({ version: 1 }));
+    localStorage.setItem("callContext", JSON.stringify({ version: 1, candidate: { name: "Ada" }, jobOffer: { title: "Engineer" } }));
   });
 
   afterEach(() => {
