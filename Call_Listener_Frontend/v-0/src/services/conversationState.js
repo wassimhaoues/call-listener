@@ -35,6 +35,7 @@ export const CONNECTION = {
 const GENERATION = {
   IDLE: "idle",
   THINKING: "thinking",
+  STREAMING: "streaming",
   FAILED: "failed",
   BUDGET_REACHED: "budget_reached",
 };
@@ -50,6 +51,9 @@ export const UNSUPPORTED_MODEL_TEXT =
 // state without limit. The newest entries are kept.
 export const MAX_TRANSCRIPT_ENTRIES = 500;
 const MAX_MODEL_NAME_CHARS = 160;
+// Bound streamed text so a misbehaving server cannot grow state without limit.
+// The server caps output tokens far below this.
+export const MAX_STREAMED_SUGGESTION_CHARS = 20_000;
 
 // Report congestion on the first dropped chunk and then every Nth one, so the
 // status line does not flicker on every 20 ms batch.
@@ -108,7 +112,9 @@ export function deriveStatus(state) {
   if (state.notice) return state.notice;
   if (state.generation === GENERATION.BUDGET_REACHED) return STATUS.BUDGET_REACHED;
   if (state.modelUnavailable) return STATUS.MODEL_UNAVAILABLE;
+  // Streaming still means "the answer is being prepared".
   if (state.generation === GENERATION.THINKING) return STATUS.THINKING;
+  if (state.generation === GENERATION.STREAMING) return STATUS.THINKING;
   if (state.generation === GENERATION.FAILED) return STATUS.GUIDANCE_UNAVAILABLE;
   return state.isCapturing ? STATUS.LISTENING : STATUS.CONNECTED;
 }
@@ -126,6 +132,10 @@ const baseState = {
   suggestion: "",
   model: null,
   isThinking: false,
+  // Streamed generations (opt-in `stream` capability): the ID of the current
+  // generation, and whether `suggestion` is still-growing partial text.
+  generationId: null,
+  isStreaming: false,
   isPaused: false,
   droppedAudioChunks: 0,
 };
@@ -178,8 +188,7 @@ function toModelInfo(model) {
 
 // Server message handlers run in this fixed order on every incoming message.
 // One message can carry several fields; later handlers see earlier results.
-// New message kinds (e.g. streamed generations keyed by generation ID) slot in
-// as additional handlers without changing the socket hook.
+// Streamed generations are keyed by generation ID (see applyGenerationDelta).
 function applyTranscript(state, message) {
   let next = state;
   if (message.speaker === "you") {
@@ -194,33 +203,57 @@ function applyTranscript(state, message) {
   return next;
 }
 
+// Generation messages from streaming-capable servers carry `generation.id`;
+// legacy messages (and introductory replies) have none.
+function hasGenerationId(message) {
+  return !!message.generation && Object.hasOwn(message.generation, "id");
+}
+
+// A message tagged with a generation ID only applies to the current
+// generation; anything else is stale (superseded) and ignored.
+function isForCurrentGeneration(state, message) {
+  if (!hasGenerationId(message)) return true;
+  const { id } = message.generation;
+  return typeof id === "string" && id !== "" && id === state.generationId;
+}
+
 function applyGenerationResult(state, message) {
-  if (message.generation?.state === "failed") {
-    // Terminal for this question: transcription keeps running.
+  const failed = message.generation?.state === "failed";
+  if (!failed && !message.ai_reply) return state;
+  if (!isForCurrentGeneration(state, message)) return state;
+  // A tagged terminal message completes its generation exactly once; a
+  // duplicate for the same ID no longer matches and is ignored.
+  const generationId = hasGenerationId(message) ? null : state.generationId;
+  if (failed) {
+    // Terminal for this question: transcription keeps running. Any partial
+    // streamed text is discarded.
     return {
       ...state,
       suggestion: GUIDANCE_UNAVAILABLE_TEXT,
       model: null,
       isThinking: false,
+      isStreaming: false,
+      generationId,
       generation: GENERATION.FAILED,
       notice: null,
     };
   }
-  if (message.ai_reply) {
-    return {
-      ...state,
-      suggestion: toSuggestionText(message.ai_reply),
-      model: toModelInfo(message.model),
-      isThinking: false,
-      generation: GENERATION.IDLE,
-      notice: null,
-    };
-  }
-  return state;
+  // The final reply replaces any streamed text.
+  return {
+    ...state,
+    suggestion: toSuggestionText(message.ai_reply),
+    model: toModelInfo(message.model),
+    isThinking: false,
+    isStreaming: false,
+    generationId,
+    generation: GENERATION.IDLE,
+    notice: null,
+  };
 }
 
 function applyGenerationThinking(state, message) {
   if (message.generation?.state !== "thinking") return state;
+  const { id } = message.generation;
   // Clear the previous suggestion so stale guidance is never presented as the
   // answer to the question now being generated.
   return {
@@ -228,7 +261,30 @@ function applyGenerationThinking(state, message) {
     suggestion: "",
     model: null,
     isThinking: true,
+    isStreaming: false,
+    generationId: typeof id === "string" && id ? id : null,
     generation: GENERATION.THINKING,
+    notice: null,
+  };
+}
+
+function applyGenerationDelta(state, message) {
+  if (message.generation?.state !== "streaming") return state;
+  if (typeof message.delta !== "string" || !message.delta) return state;
+  // Deltas must name the current generation, and only extend one that is
+  // still in progress (never one that already completed or failed).
+  if (!hasGenerationId(message) || !isForCurrentGeneration(state, message)) return state;
+  if (state.generation !== GENERATION.THINKING && state.generation !== GENERATION.STREAMING) {
+    return state;
+  }
+  const base = state.isStreaming ? state.suggestion : "";
+  return {
+    ...state,
+    suggestion: (base + message.delta).slice(0, MAX_STREAMED_SUGGESTION_CHARS),
+    model: null,
+    isThinking: false,
+    isStreaming: true,
+    generation: GENERATION.STREAMING,
     notice: null,
   };
 }
@@ -240,6 +296,8 @@ function applyServerError(state, message) {
       suggestion: BUDGET_REACHED_TEXT,
       model: null,
       isThinking: false,
+      isStreaming: false,
+      generationId: null,
       generation: GENERATION.BUDGET_REACHED,
     };
   }
@@ -255,6 +313,7 @@ const SERVER_MESSAGE_HANDLERS = [
   applyTranscript,
   applyGenerationResult,
   applyGenerationThinking,
+  applyGenerationDelta,
   applyServerError,
 ];
 
@@ -289,6 +348,10 @@ function reduceFacts(state, action) {
         suggestion: "",
         model: null,
         isThinking: true,
+        // Until the server names the new generation, deltas still in flight
+        // for the previous one must not reappear.
+        isStreaming: false,
+        generationId: null,
         generation: GENERATION.THINKING,
         notice: null,
       };

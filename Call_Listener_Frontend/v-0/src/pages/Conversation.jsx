@@ -204,6 +204,7 @@ export default function Conversation() {
               suggestion={state.suggestion}
               evidence={evidenceReferences}
               isThinking={state.isThinking}
+              isStreaming={state.isStreaming}
               model={state.model}
               alerts={alerts}
               onSubmitTypedQuestion={

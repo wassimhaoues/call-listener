@@ -1,4 +1,5 @@
 import { loggers } from "../../core/logger/index.js";
+import { parseClientCapabilities } from "../../contracts/interviewContext.js";
 
 export const MAX_AUDIO_CHUNK_BYTES = 64 * 1024;
 export const MAX_TYPED_INTERVIEWER_QUESTION_CHARS = 2_000;
@@ -73,6 +74,7 @@ export function createMessageHandler({
   generateReply,
   buildPrompt,
   parseContext = (context) => context,
+  parseCapabilities = parseClientCapabilities,
   Budget,
   isModelAllowed = () => false,
   log = loggers.websocket,
@@ -107,6 +109,9 @@ export function createMessageHandler({
           }
           throw parseError;
         }
+        // A malformed capability list rejects the whole context frame
+        // ("Invalid message"); nothing below has been stored yet.
+        const capabilities = parseCapabilities(msg.context);
         const selectedModel = context.settings?.model;
         if (selectedModel !== undefined && !isModelAllowed(selectedModel)) {
           // Reject rather than silently substituting another model; the
@@ -121,6 +126,9 @@ export function createMessageHandler({
           context.settings?.transcriptionLanguage || context.settings?.language || "fr"
         );
         await ContextStore.set(sessionId, context);
+        // Capabilities follow the latest accepted context, so a client that
+        // resends context without `stream` is downgraded for later generations.
+        streamManager.setClientCapabilities?.(capabilities);
         // The accepted context supersedes any in-flight intro; session end and
         // socket close abort it through the stream manager's lifecycle.
         const intro = beginIntro(streamManager);

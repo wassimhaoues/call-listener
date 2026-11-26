@@ -1,6 +1,6 @@
 import React from "react";
 import { expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import LiveGuidancePanel from "../src/components/LiveGuidancePanel.jsx";
 
 it("shows the current question, safe suggestion text, and candidate evidence", () => {
@@ -62,6 +62,35 @@ it("shows the model subtly, and both names when the provider served another", ()
   expect(screen.getByText("Model: b/two (requested a/one)")).toBeInTheDocument();
   rerender(<LiveGuidancePanel question="" suggestion="Answer." model={null} />);
   expect(screen.queryByText(/^Model:/)).toBeNull();
+});
+
+it("shows streamed partial guidance as plain text while it is still being written", () => {
+  const { container, rerender } = render(
+    <LiveGuidancePanel
+      isStreaming
+      question="How did you lead the migration?"
+      suggestion={'<b onclick="x()">Partial</b>\nLead with the migr'}
+      model={{ selected: "a/one", actual: null }}
+    />
+  );
+  // Earlier tests' renders stay mounted (no auto-cleanup), so scope queries.
+  const view = within(container);
+  expect(view.getByText("Lead with the migr")).toBeInTheDocument();
+  expect(view.getByText('<b onclick="x()">Partial</b>')).toBeInTheDocument();
+  expect(container.querySelector("b")).toBeNull();
+  expect(view.getByRole("status")).toHaveTextContent("Still writing…");
+  expect(view.queryByText(/^Model:/)).toBeNull();
+
+  rerender(
+    <LiveGuidancePanel
+      question="How did you lead the migration?"
+      suggestion="Lead with the migration."
+      model={{ selected: "a/one", actual: null }}
+    />
+  );
+  expect(view.getByText("Lead with the migration.")).toBeInTheDocument();
+  expect(view.queryByText("Still writing…")).toBeNull();
+  expect(view.getByText("Model: a/one")).toBeInTheDocument();
 });
 
 it("renders session alerts as text", () => {
