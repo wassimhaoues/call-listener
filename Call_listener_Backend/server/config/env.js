@@ -29,6 +29,7 @@ const CONFIG = {
   MAX_INTERVIEW_COST_USD: Number(process.env.MAX_INTERVIEW_COST_USD || 5),
   // How long a disconnected resume-capable session is kept for `{ resume }`.
   RESUME_WINDOW_MS: Number(process.env.RESUME_WINDOW_MS || 120_000),
+  MAX_DISCONNECTED_SESSIONS_PER_OWNER: Number(process.env.MAX_DISCONNECTED_SESSIONS_PER_OWNER || 3),
   OPENROUTER_INPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_INPUT_USD_PER_MILLION_TOKENS || 0.2),
   OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS || 1.2),
   COOKIE_SECURE: process.env.COOKIE_SECURE
@@ -48,6 +49,12 @@ if (AI_PROVIDER === "groq") required.push("GROQ_API_KEY");
 if (AI_PROVIDER === "openrouter") required.push("OPENROUTER_API_KEY");
 if (!new Set(["groq", "openrouter"]).has(AI_PROVIDER)) {
   throw new Error("AI_PROVIDER must be groq or openrouter");
+}
+if (
+  !Number.isInteger(CONFIG.MAX_DISCONNECTED_SESSIONS_PER_OWNER) ||
+  CONFIG.MAX_DISCONNECTED_SESSIONS_PER_OWNER < 1
+) {
+  throw new Error("MAX_DISCONNECTED_SESSIONS_PER_OWNER must be a positive integer");
 }
 for (const key of [
   "OPENROUTER_MAX_OUTPUT_TOKENS",

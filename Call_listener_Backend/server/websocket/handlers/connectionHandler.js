@@ -73,6 +73,7 @@ const sessions = createSessionManager({
     await Budget?.clear(sessionId);
   },
   resumeWindowMs: CONFIG.RESUME_WINDOW_MS,
+  maxDisconnectedPerOwner: CONFIG.MAX_DISCONNECTED_SESSIONS_PER_OWNER,
   log,
 });
 

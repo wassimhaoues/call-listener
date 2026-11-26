@@ -3,6 +3,8 @@ import { createSessionId } from "./sessionId.js";
 import { SessionChannel } from "./sessionChannel.js";
 
 export const DEFAULT_RESUME_WINDOW_MS = 120_000;
+/** Disconnected sessions one owner may hold at once; the oldest is purged first. */
+export const DEFAULT_MAX_DISCONNECTED_PER_OWNER = 3;
 
 export const SESSION_STATE = Object.freeze({
   ACTIVE: "active",
@@ -56,6 +58,8 @@ export function createSessionManager({
   createStreamManager,
   purgeSession,
   resumeWindowMs = DEFAULT_RESUME_WINDOW_MS,
+  maxDisconnectedPerOwner = DEFAULT_MAX_DISCONNECTED_PER_OWNER,
+  now = Date.now,
   replayLimits,
   createId = createSessionId,
   timers = { setTimeout, clearTimeout },
@@ -69,6 +73,9 @@ export function createSessionManager({
   }
   if (!Number.isFinite(resumeWindowMs) || resumeWindowMs < 0) {
     throw new TypeError("resumeWindowMs must be a non-negative number");
+  }
+  if (!Number.isInteger(maxDisconnectedPerOwner) || maxDisconnectedPerOwner < 1) {
+    throw new TypeError("maxDisconnectedPerOwner must be a positive integer");
   }
 
   const sessions = new Map();
@@ -92,6 +99,7 @@ export function createSessionManager({
       channel,
       streamManager: createStreamManager(id),
       expiryTimer: null,
+      disconnectedAt: null,
     };
     sessions.set(id, session);
     return session;
@@ -127,8 +135,26 @@ export function createSessionManager({
     }
   }
 
+  /** Purge the owner's oldest disconnected sessions so at most `max - 1` remain. */
+  async function enforceOwnerCap(session) {
+    const held = [...sessions.values()]
+      .filter(
+        (other) =>
+          other !== session &&
+          other.state === SESSION_STATE.DISCONNECTED &&
+          isSameOwner(other.owner, session.owner)
+      )
+      .sort((a, b) => a.disconnectedAt - b.disconnectedAt);
+    const excess = held.length - (maxDisconnectedPerOwner - 1);
+    for (const oldest of held.slice(0, Math.max(0, excess))) {
+      log.warn(`🧹 Owner holds too many disconnected sessions; purging [${oldest.id}].`);
+      await expire(oldest);
+    }
+  }
+
   function startResumeWindow(session) {
     session.state = SESSION_STATE.DISCONNECTED;
+    session.disconnectedAt = now();
     clearExpiry(session);
     session.expiryTimer = timers.setTimeout(() => {
       void expire(session);
@@ -157,6 +183,7 @@ export function createSessionManager({
       return;
     }
     log.info(`⏸️ Session [${session.id}] disconnected; resumable for ${resumeWindowMs} ms.`);
+    await enforceOwnerCap(session);
     await suspend(session);
   }
 
