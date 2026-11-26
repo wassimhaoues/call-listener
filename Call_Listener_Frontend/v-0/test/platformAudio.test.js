@@ -400,6 +400,13 @@ describe("Linux interviewer source", () => {
     });
   });
 
+  it("runs pactl only from a fixed system directory", () => {
+    const { findPactl } = require("../services/platformAudio/linuxInterviewerSource.js");
+    expect(findPactl((candidate) => candidate === "/bin/pactl")).toBe("/bin/pactl");
+    expect(findPactl((candidate) => candidate !== "/nonexistent")).toBe("/usr/bin/pactl");
+    expect(findPactl(() => false)).toBeNull();
+  });
+
   it("refuses an unsafe sink name and reports a missing pactl by code", async () => {
     const unsafe = fakePactl({ sink: 'evil" source_name=x' });
     expect(await createLinuxInterviewerSource({ run: unsafe.run, logger: silentLogger }).create()).toEqual({

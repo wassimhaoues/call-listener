@@ -122,16 +122,14 @@ export default function Setup() {
       setCreateState(`failed:${result?.code || "failed"}`);
       return;
     }
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    const listUntilFound = async (attemptsLeft) => {
       const found = await refreshLinuxDevices();
       if (!mountedRef.current) return;
-      if (found > 0) {
-        setCreateState("idle");
-        return;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-    setCreateState("failed:not-found");
+      if (found > 0) setCreateState("idle");
+      else if (attemptsLeft <= 1) setCreateState("failed:not-found");
+      else setTimeout(() => listUntilFound(attemptsLeft - 1), 500);
+    };
+    await listUntilFound(3);
   }, [refreshLinuxDevices]);
 
   useEffect(() => {

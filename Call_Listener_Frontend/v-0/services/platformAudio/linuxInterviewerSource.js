@@ -9,7 +9,8 @@
 // It changes nothing else: the default input and output stay as they are, and
 // only a module carrying our own source name is ever unloaded (on exit, or at
 // startup after a crash).
-const { execFile } = require("child_process");
+const { execFile } = require("node:child_process");
+const fs = require("node:fs");
 
 const SOURCE_NAME = "call_listener_interviewer";
 // Setup recognises this label through its "Monitor of …" pattern.
@@ -19,9 +20,18 @@ const COMMAND_TIMEOUT_MS = 5_000;
 // out of the module argument.
 const SINK_NAME = /^[\w.:@+-]{1,200}$/;
 
+// pactl is run from a fixed system directory, never looked up through PATH.
+const PACTL_PATHS = ["/usr/bin/pactl", "/bin/pactl"];
+
+function findPactl(exists = fs.existsSync) {
+  return PACTL_PATHS.find((candidate) => exists(candidate)) || null;
+}
+
 function runPactl(args) {
+  const pactl = findPactl();
+  if (!pactl) return Promise.reject(Object.assign(new Error("pactl not found"), { code: "ENOENT" }));
   return new Promise((resolve, reject) => {
-    execFile("pactl", args, { timeout: COMMAND_TIMEOUT_MS }, (error, stdout) => {
+    execFile(pactl, args, { timeout: COMMAND_TIMEOUT_MS }, (error, stdout) => {
       if (error) reject(error);
       else resolve(String(stdout));
     });
@@ -44,7 +54,7 @@ function ownModuleIds(shortModules) {
 function createLinuxInterviewerSource({ run = runPactl, logger = console } = {}) {
   async function unloadOwn() {
     const ids = ownModuleIds(await run(["list", "short", "modules"]));
-    for (const id of ids) await run(["unload-module", id]);
+    await Promise.all(ids.map((id) => run(["unload-module", id])));
     return ids.length;
   }
 
@@ -60,7 +70,7 @@ function createLinuxInterviewerSource({ run = runPactl, logger = console } = {})
         const sink = (await run(["get-default-sink"])).trim();
         if (!SINK_NAME.test(sink)) return { ok: false, code: "no-default-output" };
         await unloadOwn();
-        const description = `\\"${SOURCE_LABEL}\\"`;
+        const description = String.raw`\"${SOURCE_LABEL}\"`;
         await run([
           "load-module",
           "module-remap-source",
@@ -87,4 +97,4 @@ function createLinuxInterviewerSource({ run = runPactl, logger = console } = {})
   };
 }
 
-module.exports = { createLinuxInterviewerSource, ownModuleIds, SOURCE_NAME, SOURCE_LABEL };
+module.exports = { createLinuxInterviewerSource, findPactl, ownModuleIds, SOURCE_NAME, SOURCE_LABEL };
