@@ -55,6 +55,10 @@ describe("buildDebriefMarkdown", () => {
       "  - Why: No outcome mentioned.",
       "  - Practice: End with one number.",
       "",
+      "## Your notes",
+      "",
+      "No notes.",
+      "",
       "## Follow-up draft",
       "",
       "~~~text",
@@ -88,6 +92,7 @@ describe("buildDebriefMarkdown", () => {
       "## Questions covered",
       "## Strengths",
       "## Topics to improve",
+      "## Your notes",
       "## Follow-up draft",
     ]);
     expect(markdown).toContain("No draft.");
@@ -146,5 +151,17 @@ describe("downloadMarkdown", () => {
     scheduled.forEach((fn) => fn());
     expect(url.revokeObjectURL).toHaveBeenCalledWith("blob:review");
     click.mockRestore();
+  });
+});
+
+describe("self-review notes", () => {
+  it("exports the candidate's notes as literal text, with or without an AI review", () => {
+    const notes = "Answer on Redis was too long.\n## not a heading <b>x</b>";
+    const withReview = buildDebriefMarkdown({ review: { questionsCovered: [], strengths: [], improvementTopics: [] }, selfReviewNotes: notes });
+    expect(withReview).toContain("## Your notes\n\n~~~text\n" + notes + "\n~~~");
+    const withoutReview = buildDebriefMarkdown({ review: null, selfReviewNotes: notes, date: new Date("2026-11-26T10:00:00Z") });
+    expect(withoutReview.split("\n").filter((line) => line.startsWith("#") && !line.startsWith("## not"))).toEqual(["# Interview review", "## Your notes"]);
+    expect(withoutReview).toContain("No AI review was available");
+    expect(withoutReview).not.toContain("Follow-up draft");
   });
 });

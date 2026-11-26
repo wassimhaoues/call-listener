@@ -53,6 +53,8 @@ const LIMITS = Object.freeze({
 
 // The editable follow-up draft can grow while the candidate types.
 export const MAX_FOLLOW_UP_DRAFT_CHARS = 8_000;
+// The candidate's own self-review notes; held only in memory like the review.
+export const MAX_SELF_REVIEW_NOTES_CHARS = 8_000;
 
 function text(value, max = LIMITS.text) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -111,13 +113,20 @@ export const initialDebriefState = Object.freeze({
   status: DEBRIEF.IDLE,
   review: null,
   followUpDraft: "",
+  selfReviewNotes: "",
   reason: "",
 });
 
 export const debriefRequested = () => ({ type: "debrief/requested" });
 export const debriefReceived = (payload) => ({ type: "debrief/received", payload });
 export const followUpDraftEdited = (value) => ({ type: "debrief/followUpEdited", value });
+export const selfReviewNotesEdited = (value) => ({ type: "debrief/notesEdited", value });
 export const debriefDiscarded = () => ({ type: "debrief/discarded" });
+
+/** Notes can be written once the review screen has a result, even without an AI review. */
+export function canWriteSelfReview(status) {
+  return status === DEBRIEF.READY || status === DEBRIEF.FAILED || status === DEBRIEF.SKIPPED;
+}
 
 export function debriefReducer(state = initialDebriefState, action) {
   switch (action?.type) {
@@ -133,6 +142,7 @@ export function debriefReducer(state = initialDebriefState, action) {
           status: DEBRIEF.READY,
           review: result.review,
           followUpDraft: result.review.followUpDraft,
+          selfReviewNotes: "",
           reason: "",
         };
       }
@@ -141,6 +151,9 @@ export function debriefReducer(state = initialDebriefState, action) {
     case "debrief/followUpEdited":
       if (state.status !== DEBRIEF.READY) return state;
       return { ...state, followUpDraft: String(action.value ?? "").slice(0, MAX_FOLLOW_UP_DRAFT_CHARS) };
+    case "debrief/notesEdited":
+      if (!canWriteSelfReview(state.status)) return state;
+      return { ...state, selfReviewNotes: String(action.value ?? "").slice(0, MAX_SELF_REVIEW_NOTES_CHARS) };
     case "debrief/discarded":
       return initialDebriefState;
     default:

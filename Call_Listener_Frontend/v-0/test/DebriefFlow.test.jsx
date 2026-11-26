@@ -163,6 +163,31 @@ describe("Stop and review", () => {
     click.mockRestore();
   });
 
+  it("lets the candidate write and export self-review notes when the AI review was skipped", async () => {
+    const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+    const createObjectURL = vi.fn(() => "blob:notes");
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = vi.fn();
+    onTestFinished(() => {
+      URL.createObjectURL = original.create;
+      URL.revokeObjectURL = original.revoke;
+    });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const ws = await stopAndReview();
+    await act(async () => ws.serverSend({ debrief: { status: "skipped", reason: "budget_reached" } }));
+    expect(screen.queryByRole("button", { name: "Export as Markdown" })).toBeNull();
+    const storedBefore = { ...localStorage };
+
+    fireEvent.change(screen.getByLabelText("Your notes"), { target: { value: "Slow start on the Redis question." } });
+    fireEvent.click(screen.getByRole("button", { name: "Export as Markdown" }));
+
+    const markdown = await readBlob(createObjectURL.mock.calls[0][0]);
+    expect(markdown).toContain("~~~text\nSlow start on the Redis question.\n~~~");
+    expect(markdown).toContain("No AI review was available");
+    expect({ ...localStorage }).toEqual(storedBefore);
+    click.mockRestore();
+  });
+
   it("discard forgets the review and returns to setup", async () => {
     const ws = await stopAndReview();
     await act(async () => ws.serverSend({ debrief: { status: "ready", review: REVIEW } }));

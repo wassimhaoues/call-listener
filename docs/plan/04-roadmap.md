@@ -120,7 +120,7 @@ Rollback: independently revert batching size/transport capability or endpoint tu
 Depends on Phase 6. Outcome: the candidate can learn from and optionally retain their interview.
 
 - [x] Generate a review from actual spoken transcript, clearly separating AI suggestions from statements the candidate made. Unsaved debrief with Markdown export (2026-11-26).
-- [ ] Add questions covered, self-review notes, evidence-based improvement topics, and editable follow-up drafts; do not automate external messages.
+- [x] Add questions covered, self-review notes, evidence-based improvement topics, and editable follow-up drafts; do not automate external messages. **Complete 2026-11-26:** the unsaved debrief shows questions covered with evidence used, strengths, improvement topics, and an editable follow-up draft that is never sent; the candidate can write self-review notes in every result state (also when the AI review was skipped or failed) and export them as Markdown.
 - [ ] Offer save/export/delete. Select durable storage through an architecture decision: local encrypted storage for a single-device product, or authenticated backend storage for account-based sync. Implement one initially, not both.
 - [ ] Apply owner isolation, retention, backup/deletion behavior, and schema migration tests. Saved history must not depend on ephemeral Redis keys or an in-memory graph checkpointer.
 - [ ] Add document upload/parsing only as a separately gated extension with size/type limits, extraction review, and candidate-controlled deletion.

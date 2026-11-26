@@ -38,6 +38,7 @@ import {
   debriefReducer,
   debriefRequested,
   followUpDraftEdited,
+  selfReviewNotesEdited,
   initialDebriefState,
 } from "@/services/debriefState.js";
 import {
@@ -154,6 +155,7 @@ export default function Conversation() {
     const markdown = buildDebriefMarkdown({
       review: debrief.review,
       followUpDraft: debrief.followUpDraft,
+      selfReviewNotes: debrief.selfReviewNotes,
       evidence: evidenceReferences,
       date: now,
     });
@@ -304,6 +306,7 @@ export default function Conversation() {
           onDiscard={discardDebrief}
           onExport={exportDebrief}
           onFollowUpDraftChange={(value) => dispatchDebrief(followUpDraftEdited(value))}
+          onSelfReviewNotesChange={(value) => dispatchDebrief(selfReviewNotesEdited(value))}
           state={debrief}
         />
       </div>
