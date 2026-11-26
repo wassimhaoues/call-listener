@@ -23,6 +23,7 @@ Use OpenRouter for selectable language models, LangChain for model integration a
 10. [Backend fixtures and session replay](fixtures.md)
 11. [Offline evaluation of live suggestions](evaluation.md)
 12. [Provider retries and request idempotency](provider-retries.md)
+13. [Audio framing: base64 JSON vs binary frames](audio-framing.md)
 
 ## Delivery sequence
 
