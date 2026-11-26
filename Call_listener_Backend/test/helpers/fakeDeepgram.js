@@ -26,6 +26,15 @@ class FakeLiveConnection extends EventEmitter {
 
   keepAlive() {}
 
+  // Like Deepgram: answers `Finalize` with a `from_finalize` Results event.
+  // `onFinalize` (set by a test) decides the text; null never answers.
+  finalize() {
+    this.finalizeCalls = (this.finalizeCalls ?? 0) + 1;
+    const text = this.onFinalize === undefined ? "" : this.onFinalize;
+    if (text === null) return;
+    setImmediate(() => this.emit(LiveTranscriptionEvents.Transcript, { ...deepgramResults(text), from_finalize: true }));
+  }
+
   async finish() {
     this.finishCalls += 1;
     this.emit(LiveTranscriptionEvents.Close);

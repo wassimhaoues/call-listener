@@ -564,8 +564,33 @@ export class StreamManager {
     this.pendingQuestion = null;
   }
 
-  /** Detach and stop the current transcription streams. */
-  async stopStreams() {
+  /**
+   * The last words flushed when an interview ends explicitly: stored in the
+   * history (so the debrief sees the final answer) and shown to the client.
+   * The session is already closed, so no generation is started.
+   */
+  async recordFinalUtterance(label, text) {
+    const role = SPEAKER_BY_LABEL[label] ?? "caller";
+    try {
+      await this.ChatHistory.push(this.sessionId, role, text);
+    } catch (error) {
+      this.log.error(`❌ Failed saving final transcript [${this.sessionId}]: %o`, error);
+    }
+    if (this.wsClient && this.wsClient.readyState === this.wsClient.OPEN) {
+      try {
+        this.wsClient.send(JSON.stringify({ speaker: role, transcript: text }));
+      } catch (sendError) {
+        this.log.error(`❌ WS send final transcript failed [${this.sessionId}]: %o`, sendError);
+      }
+    }
+  }
+
+  /**
+   * Detach and stop the current transcription streams. With `flushFinal`,
+   * each stream first finalizes buffered audio and its remaining text is
+   * recorded (see recordFinalUtterance).
+   */
+  async stopStreams({ flushFinal = false } = {}) {
     const streams = Object.entries(this.streams);
     this.streams = {};
     this.listenersAttached = {};
@@ -576,7 +601,11 @@ export class StreamManager {
         try {
           stream.removeAllListeners?.("utterance");
           stream.removeAllListeners?.("interim");
-          await stream.stop();
+          if (flushFinal) {
+            stream.on?.("utterance", ({ label: eventLabel, text }) => this.recordFinalUtterance(eventLabel ?? label, text));
+          }
+          await stream.stop({ flush: flushFinal });
+          stream.removeAllListeners?.("utterance");
           this.log.debug(`🔻 Closed [${label}] stream`);
         } catch (error) {
           this.log.error(`❌ Error closing [${label}] stream: %o`, error);
@@ -615,7 +644,11 @@ export class StreamManager {
     await this.stopStreams();
   }
 
-  async closeAll() {
+  /**
+   * Close the session's streams and stop all model work. `flushFinal` (an
+   * explicit end) keeps the words spoken just before it: see stopStreams.
+   */
+  async closeAll({ flushFinal = false } = {}) {
     if (this.closePromise) return this.closePromise;
 
     this.closed = true;
@@ -623,7 +656,7 @@ export class StreamManager {
     this.cancelPendingWork("session closed");
     this.closePromise = (async () => {
       this.log.info(`🧹 Closing all Deepgram streams for session [${this.sessionId}]`);
-      await this.stopStreams();
+      await this.stopStreams({ flushFinal });
       this.isResponding = false;
     })();
     return this.closePromise;

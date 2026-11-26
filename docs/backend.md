@@ -125,7 +125,7 @@ An operator deny-list that cuts off one installation (`device_id`, the desktop's
 
 ## Integrations and data
 
-`DeepgramService` uses the `nova-3` live model with `linear16`, 48 kHz mono audio, French language, interim results (forwarded only to `interim`-capable clients, see above), VAD, and utterance boundaries. `StreamManager` limits generated replies to one at a time and uses an 800 ms cooldown and a 12-second model timeout.
+`DeepgramService` uses the `nova-3` live model with `linear16`, 48 kHz mono audio, French language, interim results (forwarded only to `interim`-capable clients, see above), VAD, and utterance boundaries (`endpointing: 400`, `utterance_end_ms: 1200`). Audio sent before the Deepgram socket opens is queued by the SDK and sent on open. On an explicit `{ end }` (plain or with the debrief), `closeAll({ flushFinal: true })` sends Deepgram `Finalize` on each stream, waits up to `FINALIZE_WAIT_MS` (1,500 ms) for its answer, and records the finalized text that had no `UtteranceEnd` yet as a last transcript line (history and client, no generation), so the debrief includes the answer given right before Stop. A socket close or disconnect stops streams without that wait. `StreamManager` limits generated replies to one at a time and uses an 800 ms cooldown and a 12-second model timeout.
 
 Redis stores JSON conversation entries in a list and context as JSON. Groq uses `openai/gpt-oss-120b`; prompt construction is in `services/ai/promptBuilder.js`. Prompts and responses should remain concise and French unless product requirements change.
 
