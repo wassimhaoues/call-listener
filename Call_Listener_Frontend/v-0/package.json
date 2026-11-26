@@ -1,6 +1,9 @@
 {
   "name": "call-listener",
   "version": "1.0.0",
+  "callBackend": {
+    "host": "caller.staging.yes-sir.tech"
+  },
   "description": "Candidate-facing job interview assistant",
   "desktopName": "call-listener",
   "homepage": "https://call.coworky.org",
