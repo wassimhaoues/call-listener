@@ -160,3 +160,28 @@ test("WebSocket ticket settings have compatible defaults and reject invalid valu
   await assert.rejects(loadWsTicketConfig({ WS_TICKET_RATE_LIMIT_PER_MINUTE: "0" }), /WS_TICKET_RATE_LIMIT_PER_MINUTE/);
   await assert.rejects(loadWsTicketConfig({ WS_ALLOW_COOKIE_AUTH: "no" }), /WS_ALLOW_COOKIE_AUTH must be true or false/);
 });
+
+const REVOCATION_KEYS = ["REVOCATION_FAIL_CLOSED", "REVOCATION_SWEEP_MS"];
+
+function loadRevocationConfig(env) {
+  return execFileAsync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { CONFIG } from ${JSON.stringify(envModuleUrl)}; process.stdout.write(JSON.stringify(${JSON.stringify(REVOCATION_KEYS)}.map((key) => CONFIG[key])));`,
+    ],
+    { cwd: os.tmpdir(), env: { ...baseEnv, ...env } }
+  );
+}
+
+test("device revocation settings default to fail-open with a one-minute sweep", async () => {
+  const defaults = await loadRevocationConfig({});
+  assert.deepEqual(JSON.parse(defaults.stdout), [false, 60_000]);
+  const configured = await loadRevocationConfig({ REVOCATION_FAIL_CLOSED: "true", REVOCATION_SWEEP_MS: "5000" });
+  assert.deepEqual(JSON.parse(configured.stdout), [true, 5000]);
+  await assert.rejects(loadRevocationConfig({ REVOCATION_FAIL_CLOSED: "yes" }), /REVOCATION_FAIL_CLOSED must be true or false/);
+  for (const value of ["999", "3600001", "1.5", "soon"]) {
+    await assert.rejects(loadRevocationConfig({ REVOCATION_SWEEP_MS: value }), /REVOCATION_SWEEP_MS/);
+  }
+});

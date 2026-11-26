@@ -50,6 +50,10 @@ const CONFIG = {
   WS_TICKET_RATE_LIMIT_PER_MINUTE: Number(process.env.WS_TICKET_RATE_LIMIT_PER_MINUTE || 30),
   // Compatibility: also accept the JWT (cookie or ?token=) on the socket.
   WS_ALLOW_COOKIE_AUTH: readBooleanFlag("WS_ALLOW_COOKIE_AUTH", true),
+  // Device deny-list: deny (true) or allow (false, default) when Redis is
+  // unreachable, and how often open sockets are re-checked.
+  REVOCATION_FAIL_CLOSED: readBooleanFlag("REVOCATION_FAIL_CLOSED", false),
+  REVOCATION_SWEEP_MS: Number(process.env.REVOCATION_SWEEP_MS || 60_000),
   MAX_DISCONNECTED_SESSIONS_PER_OWNER: Number(process.env.MAX_DISCONNECTED_SESSIONS_PER_OWNER || 3),
   OPENROUTER_INPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_INPUT_USD_PER_MILLION_TOKENS || 0.2),
   OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS || 1.2),
@@ -82,6 +86,13 @@ for (const key of ["AUTH_RATE_LIMIT_PER_MINUTE", "WS_TICKET_RATE_LIMIT_PER_MINUT
   if (!Number.isInteger(CONFIG[key]) || CONFIG[key] < 1) {
     throw new Error(`${key} must be a positive integer`);
   }
+}
+if (
+  !Number.isInteger(CONFIG.REVOCATION_SWEEP_MS) ||
+  CONFIG.REVOCATION_SWEEP_MS < 1_000 ||
+  CONFIG.REVOCATION_SWEEP_MS > 3_600_000
+) {
+  throw new Error("REVOCATION_SWEEP_MS must be an integer between 1000 and 3600000");
 }
 if (!Number.isInteger(CONFIG.TRUST_PROXY_HOPS) || CONFIG.TRUST_PROXY_HOPS < 0 || CONFIG.TRUST_PROXY_HOPS > 5) {
   throw new Error("TRUST_PROXY_HOPS must be an integer between 0 and 5");

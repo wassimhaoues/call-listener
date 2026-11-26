@@ -6,6 +6,8 @@ import jwt from "jsonwebtoken";
 const log = loggers.websocket;
 const HEARTBEAT_MS = 30_000;
 const MAX_WS_MESSAGE_BYTES = 128 * 1024;
+export const REVOKED_CLOSE_CODE = 4003;
+export const DEFAULT_REVOCATION_SWEEP_MS = 60_000;
 
 function heartbeat() {
   this.isAlive = true;
@@ -99,12 +101,64 @@ function authenticateWithToken(req, query, config) {
  * the long-lived JWT. Without a ticket, the JWT path is used only while
  * `WS_ALLOW_COOKIE_AUTH` is not false.
  */
-export async function authenticateUpgrade(req, { config, wsTickets }) {
+function resolveOwner(req, { config, wsTickets }) {
   const query = readQuery(req);
   const ticket = query.get("ticket");
   if (ticket !== null) return authenticateWithTicket(ticket, { config, wsTickets });
   if (config.WS_ALLOW_COOKIE_AUTH === false) return rejected(4001, "auth_required");
   return authenticateWithToken(req, query, config);
+}
+
+/**
+ * Authenticate the handshake, then refuse installations on the operator
+ * deny-list (`4003 device_revoked`) whichever credential was used. When the
+ * deny-list is unreachable and `deviceRevocation.failClosed` is set, the
+ * connection closes with `1011 auth_unavailable`; otherwise it is allowed.
+ */
+export async function authenticateUpgrade(req, { config, wsTickets, deviceRevocation }) {
+  const result = await resolveOwner(req, { config, wsTickets });
+  if (!result.user || !deviceRevocation) return result;
+  const access = await deviceRevocation.checkAccess(result.user.device_id);
+  if (access.allowed) return result;
+  if (access.error === "device_revoked") {
+    log.warn("WS auth refused: revoked installation");
+    return rejected(REVOKED_CLOSE_CODE, "device_revoked");
+  }
+  return rejected(1011, "auth_unavailable");
+}
+
+/**
+ * Close every open socket whose installation is now revoked. Only a definite
+ * revocation closes a socket: an unreachable deny-list never does, in either
+ * failure mode, so a Redis outage does not disconnect live interviews.
+ */
+export async function closeRevokedClients(clients, deviceRevocation) {
+  const byDevice = new Map();
+  for (const client of clients) {
+    const deviceId = client.user?.device_id;
+    if (!deviceId || client.readyState !== client.OPEN) continue;
+    if (!byDevice.has(deviceId)) byDevice.set(deviceId, []);
+    byDevice.get(deviceId).push(client);
+  }
+  let unavailable = 0;
+  const checks = [...byDevice.keys()].map((deviceId) =>
+    deviceRevocation.isRevoked(deviceId).catch(() => {
+      unavailable += 1;
+      return false;
+    })
+  );
+  const revoked = await Promise.all(checks);
+  let closed = 0;
+  [...byDevice.values()].forEach((owned, index) => {
+    if (!revoked[index]) return;
+    for (const client of owned) {
+      client.close(REVOKED_CLOSE_CODE, "device_revoked");
+      closed += 1;
+    }
+  });
+  if (unavailable > 0) log.warn(`Revocation sweep skipped ${unavailable} installation(s): deny-list unavailable`);
+  if (closed > 0) log.warn(`Revocation sweep closed ${closed} socket(s) of revoked installations`);
+  return closed;
 }
 
 /**
@@ -118,6 +172,8 @@ export function startWebSocketServer({
   config,
   handleAuthenticatedConnection,
   wsTickets,
+  deviceRevocation,
+  revocationSweepMs = DEFAULT_REVOCATION_SWEEP_MS,
 } = {}) {
   if (!config) throw new TypeError("config is required");
   if (typeof handleAuthenticatedConnection !== "function") {
@@ -133,7 +189,7 @@ export function startWebSocketServer({
       info.req.callAuth = result;
       done(true);
     };
-    authenticateUpgrade(info.req, { config, wsTickets }).then(accept, () => accept(rejected(4001, "auth_failed")));
+    authenticateUpgrade(info.req, { config, wsTickets, deviceRevocation }).then(accept, () => accept(rejected(4001, "auth_failed")));
   };
   const wss = new WebSocketServer({ port, maxPayload: MAX_WS_MESSAGE_BYTES, verifyClient });
   log.info(`🚀 WebSocket server listening on port ${port}`);
@@ -168,7 +224,27 @@ export function startWebSocketServer({
     });
   }, HEARTBEAT_MS);
 
-  wss.on("close", () => clearInterval(interval));
+  // Already-open sockets of a revoked installation are closed within one sweep
+  // interval. Every instance reads the shared Redis deny-list, so this also
+  // covers multi-instance deployments.
+  let sweep = null;
+  if (deviceRevocation && revocationSweepMs > 0) {
+    let sweeping = false;
+    sweep = setInterval(() => {
+      if (sweeping) return;
+      sweeping = true;
+      closeRevokedClients(wss.clients, deviceRevocation)
+        .catch((err) => log.error("Revocation sweep failed: %o", err?.code || "error"))
+        .finally(() => {
+          sweeping = false;
+        });
+    }, revocationSweepMs);
+  }
+
+  wss.on("close", () => {
+    clearInterval(interval);
+    if (sweep) clearInterval(sweep);
+  });
   wss.on("error", (err) => log.error("WS server error: %o", err));
   return wss;
 }

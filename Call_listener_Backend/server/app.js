@@ -3,6 +3,7 @@ import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import { createFixedWindowLimiter } from "./core/rateLimit.js";
 import { createWsTicketStore, DEFAULT_WS_TICKET_TTL_SECONDS } from "./services/auth/wsTicketStore.js";
+import { createDeviceRevocation, isDeviceId } from "./services/auth/deviceRevocation.js";
 
 /**
  * Create the HTTP API with explicit runtime dependencies.
@@ -12,7 +13,15 @@ import { createWsTicketStore, DEFAULT_WS_TICKET_TTL_SECONDS } from "./services/a
  */
 export const PREPARATION_BODY_LIMIT = "256kb";
 
-export function createApp({ redisClient, config, modelCatalog, preparationBrief, wsTickets, log } = {}) {
+export function createApp({
+  redisClient,
+  config,
+  modelCatalog,
+  preparationBrief,
+  wsTickets,
+  deviceRevocation,
+  log,
+} = {}) {
   if (!redisClient) throw new TypeError("redisClient is required");
   if (!config) throw new TypeError("config is required");
   const ticketStore =
@@ -21,6 +30,18 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief,
       redisClient,
       ttlSeconds: Number(config.WS_TICKET_TTL_SECONDS ?? DEFAULT_WS_TICKET_TTL_SECONDS),
     });
+  const revocation =
+    deviceRevocation ??
+    createDeviceRevocation({ redisClient, failClosed: config.REVOCATION_FAIL_CLOSED === true, log });
+  // Answers 403 device_revoked (or 503 when the deny-list is unreachable in
+  // fail-closed mode) and resolves true when the request must stop here.
+  async function denyIfRevoked(deviceId, res) {
+    const access = await revocation.checkAccess(deviceId);
+    if (access.allowed) return false;
+    const status = access.error === "device_revoked" ? 403 : 503;
+    res.status(status).json({ error: access.error });
+    return true;
+  }
 
   const app = express();
   // Behind a reverse proxy (Traefik), trust exactly that many hops so req.ip
@@ -59,15 +80,16 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief,
       redis: redisStatus,
     });
   });
-  app.post("/auth/token", authTokenLimiter, (req, res) => {
+  app.post("/auth/token", authTokenLimiter, async (req, res) => {
     try {
       const { app_id, device_id } = req.body || {};
       if (app_id !== config.APP_ID) {
         return res.status(401).json({ error: "invalid app" });
       }
-      if (!device_id || typeof device_id !== "string" || device_id.length < 6) {
+      if (!isDeviceId(device_id)) {
         return res.status(400).json({ error: "invalid device_id" });
       }
+      if (await denyIfRevoked(device_id, res)) return undefined;
 
       const now = Math.floor(Date.now() / 1000);
       const payload = {
@@ -110,9 +132,10 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief,
       return { error: "invalid_cookie" };
     }
   }
-  app.get("/auth/me", (req, res) => {
+  app.get("/auth/me", async (req, res) => {
     const { claims, error } = verifyCookie(req);
     if (error) return res.status(401).json({ error });
+    if (await denyIfRevoked(claims.device_id, res)) return undefined;
     return res.json({ ok: true, claims });
   });
   function requireCookie(req, res, next) {
@@ -124,9 +147,13 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief,
     req.wsTicketOwner = { app_id: claims.app_id, device_id: claims.device_id };
     return next();
   }
+  async function rejectRevokedOwner(req, res, next) {
+    if (await denyIfRevoked(req.wsTicketOwner.device_id, res)) return undefined;
+    return next();
+  }
   // A short-lived single-use credential for the WebSocket handshake, so the
   // long-lived JWT is not what authenticates the socket.
-  app.post("/ws-ticket", requireCookie, wsTicketLimiter, async (req, res) => {
+  app.post("/ws-ticket", requireCookie, rejectRevokedOwner, wsTicketLimiter, async (req, res) => {
     res.set("Cache-Control", "no-store");
     try {
       const { ticket, expiresIn } = await ticketStore.issue(req.wsTicketOwner);
@@ -137,8 +164,9 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief,
     }
   });
   app.get("/models", async (req, res) => {
-    const { error } = verifyCookie(req);
+    const { claims, error } = verifyCookie(req);
     if (error) return res.status(401).json({ error });
+    if (await denyIfRevoked(claims.device_id, res)) return undefined;
     if (!modelCatalog) return res.status(503).json({ error: "model_catalog_unavailable" });
     try {
       res.set("Cache-Control", "private, max-age=60");
@@ -150,6 +178,7 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief,
   app.post("/preparation/brief", async (req, res) => {
     const { claims, error } = verifyCookie(req);
     if (error) return res.status(401).json({ error });
+    if (await denyIfRevoked(claims.device_id, res)) return undefined;
     if (!preparationBrief) return res.status(501).json({ error: "preparation_unavailable" });
     // Stop paying for a brief nobody is waiting for.
     const controller = new AbortController();
