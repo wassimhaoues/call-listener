@@ -118,12 +118,12 @@ function loadPreparationConfig(env) {
 
 test("preparation limits have bounded defaults and reject invalid values", async () => {
   const defaults = await loadPreparationConfig({});
-  assert.deepEqual(JSON.parse(defaults.stdout), [0.5, 2000, 20000, 3]);
+  assert.deepEqual(JSON.parse(defaults.stdout), [0.5, 3000, 22000, 3]);
   const configured = await loadPreparationConfig({
     PREPARATION_DAILY_BUDGET_USD: "0",
     PREPARATION_RATE_LIMIT_PER_MINUTE: "5",
   });
-  assert.deepEqual(JSON.parse(configured.stdout), [0, 2000, 20000, 5]);
+  assert.deepEqual(JSON.parse(configured.stdout), [0, 3000, 22000, 5]);
   await assert.rejects(loadPreparationConfig({ PREPARATION_DAILY_BUDGET_USD: "-1" }), /PREPARATION_DAILY_BUDGET_USD/);
   await assert.rejects(
     loadPreparationConfig({ PREPARATION_RATE_LIMIT_PER_MINUTE: "1.5" }),
