@@ -60,7 +60,7 @@ function text(value, max = LIMITS.text) {
 
 function list(value, mapItem) {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, LIMITS.items).map(mapItem).filter(Boolean);
+  return value.slice(0, LIMITS.items).map((item, index) => mapItem(item, index)).filter(Boolean);
 }
 
 // Each item gets a local `id` so the UI has stable keys even when two items

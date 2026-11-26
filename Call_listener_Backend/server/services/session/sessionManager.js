@@ -41,6 +41,16 @@ function enableResume(session) {
 }
 
 /**
+ * An explicit end that prepares the debrief has started. Returns a signal
+ * that aborts if the socket closes first; such a close purges the session
+ * instead of holding it for a resume.
+ */
+function beginEnd(session) {
+  session.ending ??= new AbortController();
+  return session.ending.signal;
+}
+
+/**
  * In-memory registry of live interview sessions and their lifecycle:
  *
  *   active ──socket close──▶ disconnected ──resume──▶ active
@@ -129,16 +139,6 @@ export function createSessionManager({
     if (!session.resumable) return;
     await finish(session, SESSION_STATE.ENDED);
     log.info(`🛑 Session [${session.id}] ended and purged.`);
-  }
-
-  /**
-   * An explicit end that prepares the debrief has started. Returns a signal
-   * that aborts if the socket closes first; such a close purges the session
-   * instead of holding it for a resume.
-   */
-  function beginEnd(session) {
-    session.ending ??= new AbortController();
-    return session.ending.signal;
   }
 
   async function expire(session) {

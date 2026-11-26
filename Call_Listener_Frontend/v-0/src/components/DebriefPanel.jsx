@@ -129,9 +129,9 @@ export default function DebriefPanel({
           {NOT_SAVED_TEXT}
         </p>
         {status === DEBRIEF.PREPARING && (
-          <p className="text-sm text-[var(--text-2)]" role="status" aria-live="polite">
+          <output className="block text-sm text-[var(--text-2)]" aria-live="polite">
             {PREPARING_TEXT}
-          </p>
+          </output>
         )}
         {(status === DEBRIEF.FAILED || status === DEBRIEF.SKIPPED) && (
           <p className="text-sm" role="alert">{describeDebriefReason(state.reason)}</p>
@@ -160,9 +160,9 @@ export default function DebriefPanel({
           </Button>
         </div>
         {exported && (
-          <p className="text-xs text-[var(--text-2)]" role="status">
+          <output className="block text-xs text-[var(--text-2)]">
             Export started. The file goes wherever you choose to save it; Call Listener keeps no copy.
-          </p>
+          </output>
         )}
       </CardBody>
     </Card>
