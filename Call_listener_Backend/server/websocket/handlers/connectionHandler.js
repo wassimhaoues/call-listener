@@ -29,6 +29,7 @@ const generateReply = createAiReplyGenerator({
   openRouterAllowedModels: CONFIG.OPENROUTER_ALLOWED_MODELS,
   openRouterMaxOutputTokens: CONFIG.OPENROUTER_MAX_OUTPUT_TOKENS,
   openRouterRequestTimeoutMs: CONFIG.OPENROUTER_REQUEST_TIMEOUT_MS,
+  openRouterMaxRetries: CONFIG.OPENROUTER_MAX_RETRIES,
   log: loggers.ai,
 });
 const interviewWorkflow = createInterviewWorkflow({ buildPrompt, generateReply });

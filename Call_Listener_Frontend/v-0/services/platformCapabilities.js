@@ -28,6 +28,10 @@ function getPlatformCapabilities({
         supported: desktopAudioReady,
         strategy: desktopAudioReady ? "pipewire-desktop" : "unavailable",
         fallback: "monitor-source",
+        // The renderer may offer PipeWire/PulseAudio "Monitor of <output>"
+        // inputs as an optional interviewer source. The candidate must pick
+        // one explicitly; nothing is selected automatically.
+        selectableSource: "monitor-source",
         requiresCandidateConsent: true,
       },
     };

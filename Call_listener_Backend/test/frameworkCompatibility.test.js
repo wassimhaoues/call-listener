@@ -30,3 +30,13 @@ test("OpenRouter model configuration can be created without a network call", () 
   const model = new ChatOpenRouter(settings);
   assert.equal(model.model, settings.model);
 });
+
+test("ChatOpenRouter honours maxRetries: 0 so the adapter's retry policy is the only one", () => {
+  // LangChain retries failed calls six times by default; the adapter turns
+  // that off (see docs/plan/provider-retries.md). Guard against an upgrade
+  // that stops passing the option to the internal caller.
+  const defaults = new ChatOpenRouter({ apiKey: "test-key-not-used", model: "openai/gpt-4.1-mini" });
+  const disabled = new ChatOpenRouter({ apiKey: "test-key-not-used", model: "openai/gpt-4.1-mini", maxRetries: 0 });
+  assert.ok(defaults.caller.maxRetries > 0);
+  assert.equal(disabled.caller.maxRetries, 0);
+});

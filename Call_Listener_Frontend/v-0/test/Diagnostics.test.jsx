@@ -13,6 +13,7 @@ const { createPlatformAudio } = require("../services/platformAudio/index.js");
 afterEach(() => {
   cleanup();
   delete window.callApi;
+  localStorage.clear();
 });
 
 function renderAt(path, element) {
@@ -28,9 +29,10 @@ function renderAt(path, element) {
   );
 }
 
-function linuxSnapshot() {
+function linuxSnapshot(request) {
   const capabilities = getPlatformCapabilities({ platform: "linux" });
   return buildDiagnostics({
+    interviewerSource: request?.interviewerSource,
     platform: "linux",
     arch: "x64",
     env: { XDG_SESSION_TYPE: "x11" },
@@ -55,6 +57,30 @@ it("shows platform, capture strategy, versions, and actionable issues", async ()
   expect(screen.getByText(/type the interviewer's questions/i)).toBeInTheDocument();
   // Linux never routes OS audio, so no routing row.
   expect(screen.queryByText("System audio routing")).not.toBeInTheDocument();
+});
+
+it("shows the selected interviewer source kind without device details", async () => {
+  localStorage.setItem("interviewerSource", "monitor-source");
+  localStorage.setItem("sysId", "secret-device-id");
+  const getDiagnostics = vi.fn(async (request) => linuxSnapshot(request));
+  window.callApi = { getDiagnostics };
+  renderAt("/diagnostics", <Diagnostics />);
+
+  expect(await screen.findByText("Monitor source selected")).toBeInTheDocument();
+  expect(getDiagnostics).toHaveBeenCalledWith({ interviewerSource: "monitor-source" });
+  expect(document.body.textContent).not.toContain("secret-device-id");
+  expect(screen.queryByText(/type the interviewer's questions/i)).not.toBeInTheDocument();
+});
+
+it("sends no interviewer source when Setup stored an unknown value", async () => {
+  localStorage.setItem("interviewerSource", "Monitor of alice-laptop speakers");
+  const getDiagnostics = vi.fn(async (request) => linuxSnapshot(request));
+  window.callApi = { getDiagnostics };
+  renderAt("/diagnostics", <Diagnostics />);
+
+  expect(await screen.findByText("Not chosen yet")).toBeInTheDocument();
+  expect(getDiagnostics).toHaveBeenCalledWith({ interviewerSource: undefined });
+  expect(document.body.textContent).not.toContain("alice-laptop");
 });
 
 it("shows the routing row and errors for Windows", async () => {

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import { useAudioCapture } from "../src/hooks/useAudioCapture.js";
-import { installFakeAudio } from "./helpers/fakes.js";
+import { createFakeStream, installFakeAudio } from "./helpers/fakes.js";
 
 let audio;
 
@@ -232,5 +232,94 @@ describe("useAudioCapture", () => {
     expect(error.cause).toBe(denied);
     expect(audio.streams[0].tracks[0].stop).toHaveBeenCalledTimes(1);
     expect(audio.contexts[0].close).toHaveBeenCalledTimes(1);
+  });
+
+  describe("interviewer (system) device loss", () => {
+    it("releases only the system source, keeps the mic, and reports it once", async () => {
+      const onSourceLost = vi.fn();
+      const { result, onChunk } = setup({ onSourceLost });
+      await act(() => result.current.start(DEVICES));
+      const [micStream, sysStream] = audio.streams;
+      const [micNode, sysNode] = audio.workletNodes;
+      const [ctx] = audio.contexts;
+      act(() => sysNode.port.onmessage({ data: { type: "meter", source: "system", rms: 0.1 } }));
+
+      act(() => sysStream.tracks[0].end());
+
+      expect(onSourceLost).toHaveBeenCalledTimes(1);
+      expect(onSourceLost).toHaveBeenCalledWith("system");
+      expect(sysStream.tracks[0].stop).toHaveBeenCalledTimes(1);
+      expect(sysNode.port.onmessage).toBeNull();
+      expect(ctx.sources[1].disconnect).toHaveBeenCalled();
+      expect(result.current.levels.system).toEqual({ db: "–∞ dB", pct: 0 });
+      // The microphone is untouched and still delivers candidate audio.
+      expect(micStream.tracks[0].stop).not.toHaveBeenCalled();
+      expect(ctx.close).not.toHaveBeenCalled();
+      const buffer = new Int16Array([3]).buffer;
+      act(() => micNode.port.onmessage({ data: { type: "chunk", source: "mic", buffer } }));
+      expect(onChunk).toHaveBeenCalledWith("mic", buffer);
+      expect(onChunk.mock.calls.every(([source]) => source === "mic")).toBe(true);
+
+      // A repeated "ended" and the later flush do not resurrect the source.
+      act(() => sysStream.tracks[0].end());
+      expect(onSourceLost).toHaveBeenCalledTimes(1);
+      let flushed;
+      act(() => {
+        flushed = result.current.flush();
+      });
+      expect(sysNode.port.postMessage).not.toHaveBeenCalled();
+      act(() => micNode.port.onmessage({ data: { type: "flushed" } }));
+      await act(() => flushed);
+
+      act(() => result.current.stop());
+      expect(micStream.tracks[0].stop).toHaveBeenCalledTimes(1);
+      expect(sysStream.tracks[0].stop).toHaveBeenCalledTimes(1);
+    });
+
+    it("reports a system device that ended before capture finished starting", async () => {
+      const onSourceLost = vi.fn();
+      audio.getUserMedia
+        .mockImplementationOnce(async () => {
+          const stream = createFakeStream();
+          audio.streams.push(stream);
+          return stream;
+        })
+        .mockImplementationOnce(async () => {
+          const stream = createFakeStream();
+          stream.tracks[0].readyState = "ended";
+          audio.streams.push(stream);
+          return stream;
+        });
+      const { result } = setup({ onSourceLost });
+      let started;
+      await act(async () => {
+        started = await result.current.start(DEVICES);
+      });
+      expect(started).toBe(true);
+      expect(onSourceLost).toHaveBeenCalledWith("system");
+      expect(audio.streams[1].tracks[0].stop).toHaveBeenCalled();
+      expect(audio.streams[0].tracks[0].stop).not.toHaveBeenCalled();
+    });
+
+    it("does not report loss for tracks ended by stop()", async () => {
+      const onSourceLost = vi.fn();
+      const { result } = setup({ onSourceLost });
+      await act(() => result.current.start(DEVICES));
+      const sysTrack = audio.streams[1].tracks[0];
+      act(() => result.current.stop());
+      expect(sysTrack.removeEventListener).toHaveBeenCalledWith("ended", expect.any(Function));
+      act(() => sysTrack.end());
+      expect(onSourceLost).not.toHaveBeenCalled();
+    });
+
+    it("ignores mic-only sessions", async () => {
+      const onSourceLost = vi.fn();
+      const { result } = setup({ onSourceLost });
+      await act(() =>
+        result.current.start({ micId: "mic-1", sysId: null, systemAudioEnabled: false })
+      );
+      act(() => audio.streams[0].tracks[0].end());
+      expect(onSourceLost).not.toHaveBeenCalled();
+    });
   });
 });

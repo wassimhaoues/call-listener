@@ -56,8 +56,27 @@ export class FakeWebSocket {
   }
 }
 
+// MediaStreamTrack double. stop() does not fire "ended" (as in browsers);
+// end() simulates the device disappearing.
 export function createFakeTrack() {
-  return { stop: vi.fn() };
+  const listeners = new Set();
+  const track = {
+    readyState: "live",
+    stop: vi.fn(() => {
+      track.readyState = "ended";
+    }),
+    addEventListener: vi.fn((type, listener) => {
+      if (type === "ended") listeners.add(listener);
+    }),
+    removeEventListener: vi.fn((type, listener) => {
+      if (type === "ended") listeners.delete(listener);
+    }),
+    end() {
+      track.readyState = "ended";
+      listeners.forEach((listener) => listener());
+    },
+  };
+  return track;
 }
 
 export function createFakeStream() {
@@ -68,6 +87,7 @@ export function createFakeStream() {
 export function createFakeNode() {
   return {
     connect: vi.fn((target) => target),
+    disconnect: vi.fn(),
     port: { postMessage: vi.fn(), onmessage: null },
   };
 }
@@ -100,7 +120,7 @@ export function installFakeAudio({ workletFails = false } = {}) {
     }
 
     createMediaStreamSource(stream) {
-      const source = { stream, connect: vi.fn((target) => target) };
+      const source = { stream, connect: vi.fn((target) => target), disconnect: vi.fn() };
       this.sources.push(source);
       return source;
     }
