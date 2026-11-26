@@ -72,3 +72,43 @@ test("the intro prompt carries at most three evidence references", () => {
   const prompt = buildPrompt(largeContext, "intro");
   assert.equal((prompt.match(/Candidate evidence: /g) || []).length, 3);
 });
+
+test("a follow-up with no topic words inherits evidence from the preceding exchange", () => {
+  const history = [
+    "caller: Tell me about your Redis migration.",
+    "me: We moved sessions off a single node.",
+    "assistant: Mention the Kubernetes clusters you operated.",
+    "caller: What did you change afterwards?",
+  ].join("\n");
+  assert.deepEqual(selectRelevantEvidence(context, history), [
+    { requirement: "Redis experience", evidence: "Led a Redis migration" },
+  ]);
+});
+
+test("assistant suggestions never decide the evidence for a follow-up", () => {
+  const history = [
+    "caller: How is the weather?",
+    "assistant: Mention the Kubernetes clusters you operated.",
+    "caller: And then?",
+  ].join("\n");
+  assert.deepEqual(selectRelevantEvidence(context, history), JSON.parse(context).evidence);
+});
+
+test("a follow-up only looks back a bounded number of history lines", () => {
+  const history = [
+    "caller: Tell me about your Redis migration.",
+    ...Array.from({ length: 6 }, (_, index) => `me: unrelated remark ${index}`),
+    "caller: What did you change afterwards?",
+  ].join("\n");
+  assert.deepEqual(selectRelevantEvidence(context, history), JSON.parse(context).evidence);
+});
+
+test("a latest turn that matches keeps its own evidence and ignores earlier topics", () => {
+  const history = [
+    "caller: Tell me about your Redis migration.",
+    "caller: How do you run Kubernetes clusters?",
+  ].join("\n");
+  assert.deepEqual(selectRelevantEvidence(context, history), [
+    { requirement: "Kubernetes experience", evidence: "Operated Kubernetes clusters" },
+  ]);
+});
