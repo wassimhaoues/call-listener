@@ -161,6 +161,9 @@ export function createLiveReplyGenerator(config, { ChatOpenRouterClass } = {}) {
     allowedModels: config.allowedModels,
     maxOutputTokens: config.maxOutputTokens,
     requestTimeoutMs: config.requestTimeoutMs,
+    // Evaluation runs are sequential and cost-guarded per call; a retry
+    // would blur latency measurements, so they never retry.
+    maxRetries: 0,
     ...(ChatOpenRouterClass ? { ChatOpenRouterClass } : {}),
   });
 }

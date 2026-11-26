@@ -39,6 +39,73 @@
       "status": 429,
       "message": "429 Rate limit exceeded (synthetic)"
     },
+    "rateLimitedRetryAfter": {
+      "kind": "error",
+      "name": "OpenRouterRateLimitError",
+      "status": 429,
+      "headers": { "retry-after": "0.06" },
+      "message": "429 Rate limit exceeded, retry shortly (synthetic)"
+    },
+    "rateLimitedLongRetryAfter": {
+      "kind": "error",
+      "name": "OpenRouterRateLimitError",
+      "status": 429,
+      "headers": { "retry-after": "120" },
+      "message": "429 Rate limit exceeded, retry in two minutes (synthetic)"
+    },
+    "serviceUnavailable": {
+      "kind": "error",
+      "name": "OpenRouterError",
+      "status": 503,
+      "message": "503 No upstream provider available (synthetic)"
+    },
+    "badGateway": {
+      "kind": "error",
+      "name": "OpenRouterError",
+      "status": 502,
+      "message": "502 Upstream provider error (synthetic)"
+    },
+    "invalidKey": {
+      "kind": "error",
+      "name": "OpenRouterAuthError",
+      "status": 401,
+      "message": "401 Invalid API key (synthetic)"
+    },
+    "removedModel": {
+      "kind": "error",
+      "name": "OpenRouterError",
+      "status": 404,
+      "message": "404 Model not found (synthetic)"
+    },
+    "unsupportedParams": {
+      "kind": "error",
+      "name": "OpenRouterError",
+      "status": 400,
+      "message": "400 Unsupported parameter (synthetic)"
+    },
+    "connectionRefused": {
+      "kind": "error",
+      "name": "TypeError",
+      "connectionCode": "ECONNREFUSED",
+      "message": "fetch failed (synthetic)"
+    },
+    "connectionReset": {
+      "kind": "error",
+      "name": "TypeError",
+      "connectionCode": "ECONNRESET",
+      "message": "fetch failed (synthetic)"
+    },
+    "streamThenBadGateway": {
+      "kind": "stream",
+      "chunks": ["Partial answer that "],
+      "thenError": { "name": "OpenRouterError", "status": 502, "message": "502 Upstream dropped mid-stream (synthetic)" }
+    },
+    "usageThenServiceUnavailable": {
+      "kind": "stream",
+      "chunks": [""],
+      "usage_metadata": { "input_tokens": 900, "output_tokens": 0, "total_tokens": 900 },
+      "thenError": { "name": "OpenRouterError", "status": 503, "message": "503 Upstream failed after reporting usage (synthetic)" }
+    },
     "hangUntilAborted": {
       "kind": "hang"
     },
@@ -147,9 +214,43 @@
       }
     },
     {
-      "name": "429 rate limit",
+      "name": "429 rate limit on every attempt",
       "response": "rateLimited",
+      "script": ["rateLimited", "rateLimited"],
+      "calls": 2,
       "adapter": { "errorCode": "provider_request_failed", "causeStatus": 429 },
+      "session": { "outcome": "failed", "costUsd": 0 }
+    },
+    {
+      "name": "429 then success after one retry",
+      "response": "rateLimited",
+      "script": ["rateLimited", "migrationAnswer"],
+      "calls": 2,
+      "adapter": {
+        "text": "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss.",
+        "usage": { "input_tokens": 1200, "output_tokens": 150, "total_tokens": 1350 }
+      },
+      "session": {
+        "outcome": "reply",
+        "costUsd": 0.00042
+      }
+    },
+    {
+      "name": "invalid key is not retried",
+      "response": "invalidKey",
+      "adapter": { "errorCode": "provider_request_failed", "causeStatus": 401 },
+      "session": { "outcome": "failed", "costUsd": 0 }
+    },
+    {
+      "name": "removed model is not retried",
+      "response": "removedModel",
+      "adapter": { "errorCode": "provider_request_failed", "causeStatus": 404 },
+      "session": { "outcome": "failed", "costUsd": 0 }
+    },
+    {
+      "name": "unsupported parameters are not retried",
+      "response": "unsupportedParams",
+      "adapter": { "errorCode": "provider_request_failed", "causeStatus": 400 },
       "session": { "outcome": "failed", "costUsd": 0 }
     },
     {

@@ -11,6 +11,7 @@ export function createAiReplyGenerator({
   openRouterAllowedModels,
   openRouterMaxOutputTokens,
   openRouterRequestTimeoutMs,
+  openRouterMaxRetries,
   log,
   dependencies = {},
 } = {}) {
@@ -29,6 +30,7 @@ export function createAiReplyGenerator({
       allowedModels: openRouterAllowedModels,
       maxOutputTokens: openRouterMaxOutputTokens,
       requestTimeoutMs: openRouterRequestTimeoutMs,
+      maxRetries: openRouterMaxRetries,
       log,
       ...dependencies.openrouter,
     });
