@@ -16,8 +16,8 @@ The conversation page captures two distinct `audioinput` devices when system cap
 
 `src/pages/Conversation.jsx` only composes and renders the live workspace. Its logic lives in tested modules:
 
-- `src/services/conversationState.js` — pure reducer for status, transcript entries, the current (latest) interviewer question, pending/thinking guidance, stale-guidance hiding, terminal failure/budget states, pause, and dropped-audio counts. Incoming server messages pass through an ordered list of handlers.
-- `src/hooks/useInterviewSocket.js` — opens the socket from `window.callApi.getWsUrl()`, sends stored context on open, routes every socket event to one `dispatch`, applies audio backpressure, sends typed questions, and ends idempotently (also on unmount).
+- `src/services/conversationState.js` — pure reducer for status, transcript entries, the current (latest) interviewer question, pending/thinking guidance, streamed guidance keyed by generation ID (deltas append only for the current ID; the final reply replaces them; other IDs are ignored), stale-guidance hiding, terminal failure/budget states, pause, and dropped-audio counts. Incoming server messages pass through an ordered list of handlers.
+- `src/hooks/useInterviewSocket.js` — opens the socket from `window.callApi.getWsUrl()`, sends stored context on open (adding `capabilities: ["stream"]`), routes every socket event to one `dispatch`, applies audio backpressure, sends typed questions, and ends idempotently (also on unmount).
 - `src/hooks/useAudioCapture.js` — getUserMedia, AudioWorklet (or `ScriptProcessor` fallback) graph, meter levels, flush, and idempotent release of tracks and the `AudioContext`.
 - `src/services/audioCapture.js` and `src/services/interviewMessages.js` — pure capture helpers and client message encoders.
 - `src/components/TranscriptLog.jsx` — text-only transcript with near-bottom auto-scroll.
