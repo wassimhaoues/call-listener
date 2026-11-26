@@ -4,6 +4,15 @@ const os = require("os");
 const fs = require("fs");
 const { execFile, spawn } = require("child_process");
 const { parseCsvLine } = require("../utils/csv.js");
+
+// Absolute path so the installer launch never depends on PATH lookup.
+const POWERSHELL_PATH = path.join(
+  process.env.SystemRoot || "C:\\Windows",
+  "System32",
+  "WindowsPowerShell",
+  "v1.0",
+  "powershell.exe"
+);
 const {
   assertDeviceId,
   assertExecutablePath,
@@ -287,9 +296,9 @@ class AudioRouteManager {
       return false;
     }
     // PowerShell single-quoted literal: only ' needs escaping (as '').
-    const quoted = installer.replace(/'/g, "''");
+    const quoted = installer.replaceAll("'", "''");
     execFile(
-      "powershell.exe",
+      POWERSHELL_PATH,
       [
         "-NoProfile",
         "-NonInteractive",
