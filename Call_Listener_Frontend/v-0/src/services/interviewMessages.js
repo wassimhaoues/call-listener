@@ -17,8 +17,9 @@ export function bytesToBase64(bytes) {
 // Optional server features this client understands, advertised at the top
 // level of every context message. The server ignores names it doesn't know.
 // `resume` opts into resumable sessions: sequenced server messages, a session
-// ID, and `{ resume }` after an unexpected disconnect.
-export const CLIENT_CAPABILITIES = Object.freeze(["stream", "resume"]);
+// ID, and `{ resume }` after an unexpected disconnect. `debrief` lets "Stop
+// and review" end with `{ end: { debrief: true } }`.
+export const CLIENT_CAPABILITIES = Object.freeze(["stream", "resume", "debrief"]);
 
 export function encodeContextMessage(context) {
   const isObject = context && typeof context === "object" && !Array.isArray(context);
@@ -47,6 +48,8 @@ export function encodeResumeMessage(sessionId, lastSeq) {
   return JSON.stringify({ resume: { sessionId, lastSeq } });
 }
 
-export function encodeEndMessage() {
-  return JSON.stringify({ end: true });
+// A plain Stop sends `{ end: true }`; "Stop and review" asks for the unsaved
+// end-of-interview debrief with `{ end: { debrief: true } }`.
+export function encodeEndMessage({ debrief = false } = {}) {
+  return JSON.stringify({ end: debrief === true ? { debrief: true } : true });
 }

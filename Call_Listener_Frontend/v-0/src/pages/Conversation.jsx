@@ -8,6 +8,7 @@ import Meter from "@/components/Meter.jsx";
 import StatusBar from "@/components/StatusBar.jsx";
 import LiveGuidancePanel from "@/components/LiveGuidancePanel.jsx";
 import TranscriptLog from "@/components/TranscriptLog.jsx";
+import DebriefPanel from "@/components/DebriefPanel.jsx";
 import { useAudioCapture } from "@/hooks/useAudioCapture.js";
 import { useInterviewSocket } from "@/hooks/useInterviewSocket.js";
 import {
@@ -29,6 +30,20 @@ import {
   typedQuestionSubmitted,
   UNSUPPORTED_MODEL_TEXT,
 } from "@/services/conversationState.js";
+import {
+  DEBRIEF,
+  debriefDiscarded,
+  debriefReceived,
+  debriefReducer,
+  debriefRequested,
+  followUpDraftEdited,
+  initialDebriefState,
+} from "@/services/debriefState.js";
+import {
+  buildDebriefMarkdown,
+  debriefFileName,
+  downloadMarkdown,
+} from "@/services/debriefMarkdown.js";
 
 function readStoredContext() {
   const context = localStorage.getItem("callContext");
@@ -40,6 +55,9 @@ export default function Conversation() {
   const { setTitle, setActions } = useUI();
 
   const [state, dispatch] = useReducer(conversationReducer, initialConversationState);
+  // The unsaved end-of-interview review; held only in memory on this page.
+  const [debrief, dispatchDebrief] = useReducer(debriefReducer, initialDebriefState);
+  const reviewing = debrief.status !== DEBRIEF.IDLE;
   const [evidenceReferences, setEvidenceReferences] = useState([]);
   const [micLabel, setMicLabel] = useState(
     localStorage.getItem("micLabel") || "Mic"
@@ -106,6 +124,38 @@ export default function Conversation() {
     if (mountedRef.current) nav("/");
   }
 
+  // "Stop and review": the same ordering as Stop (final audio batch, then
+  // end), but the end asks for the debrief and the socket stays open until it
+  // arrives. The review replaces the live view; nothing is stored.
+  async function stopAndReview() {
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
+    dispatchDebrief(debriefRequested());
+    await capture.flush();
+    const pending = socket.endWithReview();
+    capture.stop();
+    const result = await pending;
+    if (mountedRef.current) dispatchDebrief(debriefReceived(result));
+  }
+
+  function exportDebrief() {
+    const now = new Date();
+    const markdown = buildDebriefMarkdown({
+      review: debrief.review,
+      followUpDraft: debrief.followUpDraft,
+      evidence: evidenceReferences,
+      date: now,
+    });
+    downloadMarkdown(markdown, debriefFileName(now));
+  }
+
+  // Discard (or cancel a review still being prepared): forget it and go home.
+  function discardDebrief() {
+    dispatchDebrief(debriefDiscarded());
+    socket.end();
+    nav("/");
+  }
+
   // Capture could not start: explain why, release everything, and end the
   // socket cleanly instead of leaving a session that looks live.
   function failCapture(error) {
@@ -135,13 +185,26 @@ export default function Conversation() {
     } catch {}
   }, []);
 
-  // Show Stop button in the global top bar
+  // Show Stop button in the global top bar; the review has its own controls.
   useEffect(() => {
+    if (reviewing) {
+      setTitle("Interview Review");
+      setActions(null);
+      return;
+    }
     setTitle("Live Interview");
     setActions(
       <div className="flex gap-2">
         <Button className="h-8" variant="secondary" onClick={togglePause}>
           {state.isPaused ? "Resume" : "Pause"}
+        </Button>
+        <Button
+          className="h-8"
+          variant="ghost"
+          onClick={stopAndReview}
+          title="Stop the interview and prepare an unsaved review"
+        >
+          Stop and review
         </Button>
         <Button className="h-8" variant="danger" onClick={stopSession}>
           Stop
@@ -149,7 +212,7 @@ export default function Conversation() {
       </div>
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [setTitle, setActions, state.isPaused]);
+  }, [setTitle, setActions, state.isPaused, reviewing]);
 
   useEffect(() => {
     const micId = localStorage.getItem("micId");
@@ -202,6 +265,20 @@ export default function Conversation() {
     state.captureError,
     state.modelUnavailable ? UNSUPPORTED_MODEL_TEXT : "",
   ].filter(Boolean);
+
+  if (reviewing) {
+    return (
+      <div className="h-full flex flex-col">
+        <DebriefPanel
+          evidence={evidenceReferences}
+          onDiscard={discardDebrief}
+          onExport={exportDebrief}
+          onFollowUpDraftChange={(value) => dispatchDebrief(followUpDraftEdited(value))}
+          state={debrief}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="h-full flex flex-col">
