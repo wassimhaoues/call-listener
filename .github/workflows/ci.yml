@@ -47,6 +47,54 @@ jobs:
         working-directory: Call_Listener_Frontend/v-0
         run: npm exec vite build
 
+  linux-package:
+    name: Linux packages (deb + AppImage) smoke
+    needs: test
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: Call_Listener_Frontend/v-0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Call_Listener_Frontend/v-0/package-lock.json
+      - name: Install X11/AppImage runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb imagemagick libfuse2t64 desktop-file-utils
+      # Lifecycle scripts are not needed: electron-builder downloads its own
+      # pinned Electron distribution for packaging.
+      - run: npm ci --ignore-scripts
+      - name: Build Linux packages
+        env:
+          NODE_ENV: production
+        run: |
+          ./node_modules/.bin/vite build
+          ./node_modules/.bin/electron-builder --linux deb AppImage --x64 --publish never
+      - name: Smoke test packages under Xvfb
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 &
+          export DISPLAY=:99
+          sleep 2
+          ./scripts/ci/smoke-linux.sh "$(ls dist/*.deb | head -1)" "$(ls dist/*.AppImage | head -1)" ci-linux-smoke 20
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-smoke-results
+          path: Call_Listener_Frontend/v-0/ci-linux-smoke
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            Call_Listener_Frontend/v-0/dist/*.deb
+            Call_Listener_Frontend/v-0/dist/*.AppImage
+          if-no-files-found: error
+          retention-days: 14
+
   windows-package:
     name: Windows installer
     needs: test
