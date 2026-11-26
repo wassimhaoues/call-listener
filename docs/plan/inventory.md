@@ -57,7 +57,7 @@ Nothing executable is committed. `v-0/bin/`, `dist/` and `*.zip` are git-ignored
 | electron-builder `appId` | `org.coworky.calllistener` | `build.appId` | The Windows installer identity and the shortcut's AppUserModelID. Changing it would break upgrade continuity. |
 | Windows AppUserModelID at runtime | `org.coworky.calllistener` | `services/appIdentity.js` | Must equal `build.appId` (guarded by `test/appIdentity.test.js`). Before 2026-11-26 the app set `com.coworky.calllistener`, which did not match the installed shortcut. |
 | Backend application ID | `com.coworky.calllistener` | `services/appIdentity.js` (`AUTH_APP_ID`) and backend `APP_ID` | Public API identifier sent to `/auth/token`. It is not a credential and not an installation identity. |
-| Installation identity | random per installation | `installation-id` in the Electron user-data directory | Sent as `device_id`; revocable server-side ([device revocation](../backend.md#device-revocation)). |
+| Installation identity | random per installation | `installation-id` (and the DPAPI/keychain-encrypted `device-secret.bin`) in the Electron user-data directory, `%APPDATA%\call-listener` on Windows (named after package.json `name`) | Sent as `device_id`; revocable server-side ([device revocation](../backend.md#device-revocation)). |
 | Default backend host | `call.coworky.org` (HTTPS/WSS 443) | `main.js` | Overridable in development with `CALL_*` variables. |
 | Backend package / version | `call_listener_backend` / `1.0.0` | `Call_listener_Backend/package.json` | Container image tags come from the deployment. |
 | Build targets | Windows NSIS x64, Linux AppImage and `.deb` | `build.win`, `build.linux` | All three are built and smoke-tested on every PR. |
