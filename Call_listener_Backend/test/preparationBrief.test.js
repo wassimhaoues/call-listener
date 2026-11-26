@@ -317,3 +317,80 @@ test("configured preparation runs through the real OpenRouter adapter with a fak
   const spent = [...redisClient.ttls.keys()].find((key) => key.startsWith("prep:budget:"));
   assert.ok(Math.abs(Number(await redisClient.get(spent)) - 0.0008) < 1e-9);
 });
+
+test("concurrent reservations can never jointly pass the daily ceiling", async () => {
+  const redisClient = createMemoryRedis();
+  const limits = createPreparationLimits({
+    redisClient,
+    dailyBudgetUsd: 0.01,
+    inputUsdPerMillionTokens: 1_000,
+    outputUsdPerMillionTokens: 2_000,
+    maxRequestsPerMinute: 10,
+    maxOutputTokens: 2,
+  });
+  // Each reservation: ceil(8/4)=2 input tokens * $0.001 + 2 output * $0.002 = $0.006.
+  const results = await Promise.all([
+    limits.reserve("device-a", { inputChars: 8 }),
+    limits.reserve("device-a", { inputChars: 8 }),
+    limits.reserve("device-a", { inputChars: 8 }),
+  ]);
+  const granted = results.filter(Boolean);
+  assert.equal(granted.length, 1, "only one $0.006 reservation fits under $0.01");
+  assert.ok(Math.abs(Number(await redisClient.get([...redisClient.ttls.keys()].find((k) => k.startsWith("prep:budget:")))) - 0.006) < 1e-9);
+
+  // Settling with smaller actual usage frees the difference for the next request.
+  const settled = await limits.recordUsage("device-a", { input_tokens: 2, output_tokens: 0 }, {}, granted[0]);
+  assert.ok(Math.abs(settled.spentUsd - 0.002) < 1e-9);
+  const next = await limits.reserve("device-a", { inputChars: 8 });
+  assert.ok(next, "freed budget can be reserved again");
+  await limits.release(next);
+  assert.equal(await limits.canSpend("device-a"), true);
+});
+
+test("the service reserves before calling and refuses when the reservation fails", async () => {
+  const calls = [];
+  const service = createPreparationBriefService({
+    generateReply: async () => {
+      calls.push("model");
+      return JSON.stringify(validBrief);
+    },
+    limits: {
+      takeRateToken: async () => true,
+      canSpend: async () => true,
+      reserve: async () => null,
+      release: async () => {},
+      recordUsage: async () => ({}),
+    },
+    isModelAllowed: () => true,
+  });
+  await assert.rejects(
+    service.generate({ context: sampleContext() }, { deviceId: "device-a" }),
+    (error) => error.code === "preparation_budget_reached" && error.status === 429
+  );
+  assert.deepEqual(calls, [], "no provider request without a reservation");
+});
+
+test("a failed request settles its reservation to the estimated input only", async () => {
+  const recorded = [];
+  const reservation = { key: "prep:budget:x", reservedUsd: 0.5 };
+  const service = createPreparationBriefService({
+    generateReply: async () => {
+      throw Object.assign(new Error("boom"), { code: "provider_error" });
+    },
+    limits: {
+      takeRateToken: async () => true,
+      canSpend: async () => true,
+      reserve: async () => reservation,
+      release: async () => {},
+      recordUsage: async (...args) => recorded.push(args),
+    },
+    isModelAllowed: () => true,
+  });
+  await assert.rejects(service.generate({ context: sampleContext() }, { deviceId: "device-a" }));
+  assert.equal(recorded.length, 1);
+  const [, usage, basis, passedReservation] = recorded[0];
+  assert.equal(usage.output_tokens, 0);
+  assert.equal(basis.outputChars, 0);
+  assert.ok(basis.inputChars > 0);
+  assert.equal(passedReservation, reservation);
+});

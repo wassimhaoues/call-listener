@@ -201,17 +201,39 @@ export function createPreparationBriefService({ generateReply, limits, isModelAl
   if (!limits) throw new TypeError("limits is required");
 
   async function callModel(deviceId, system, user, { model, signal, onModel }) {
+    // Reserve the worst-case cost first when the store supports it, so
+    // concurrent requests cannot jointly overspend the daily ceiling.
+    let reservation = null;
+    if (typeof limits.reserve === "function") {
+      reservation = await limits.reserve(deviceId, { inputChars: system.length + user.length });
+      if (!reservation) throw new PreparationError("preparation_budget_reached", 429);
+    }
+    let settled = false;
     try {
       return await generateReply(system, user, {
         model,
         signal,
         onModel,
-        onUsage: (usage, basis) => limits.recordUsage(deviceId, usage, basis),
+        onUsage: (usage, basis) => {
+          settled = true;
+          return limits.recordUsage(deviceId, usage, basis, reservation);
+        },
       });
     } catch (error) {
       if (error?.code === "unsupported_model") throw new PreparationError("unsupported_model", 400);
       log?.warn?.("Preparation brief generation failed (%s)", error?.code || "unknown");
       throw new PreparationError("preparation_failed", 502);
+    } finally {
+      // No usage reported (failed or aborted request): charge the estimated
+      // input conservatively and return the unused output reservation.
+      if (reservation && !settled) {
+        await limits.recordUsage(
+          deviceId,
+          { input_tokens: undefined, output_tokens: 0 },
+          { inputChars: system.length + user.length, outputChars: 0 },
+          reservation
+        );
+      }
     }
   }
 
