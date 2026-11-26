@@ -45,13 +45,30 @@ for (const testCase of contexts.invalid) {
   });
 }
 
-test("context quirks keep their current, documented behavior", () => {
-  for (const testCase of contexts.quirks) {
-    const parsed = parseInterviewContext(resolveContextCase(contexts, testCase));
-    assert.equal(testCase.expect.kind, "legacy-empty");
-    // Zod 4 object defaults short-circuit, so the nested field defaults are absent.
-    assert.deepEqual(parsed, { caller: {}, me: {} }, testCase.name);
-  }
+for (const testCase of contexts.unsupportedVersions) {
+  test(`context fixture "${testCase.name}" is rejected with an explicit error and nothing stored`, async () => {
+    const payload = resolveContextCase(contexts, testCase);
+    assert.throws(() => parseInterviewContext(payload), { code: "unsupported_context_version" });
+
+    const harness = createReplayHarness({ responses, contexts });
+    await harness.send({ context: payload });
+
+    assert.deepEqual(harness.outbound, [testCase.expect]);
+    assert.equal(await harness.ContextStore.get(harness.sessionId), null);
+    assert.equal(harness.provider.calls.length, 0);
+  });
+}
+
+test("an unsupported context version keeps the previously stored context", async () => {
+  const harness = createReplayHarness({ responses, contexts, providerScript: ["introSuccess"] });
+  await harness.send({ context: contexts.valid.validEn.payload });
+  const stored = await harness.ContextStore.get(harness.sessionId);
+
+  await harness.send({ context: { ...contexts.valid.validEn.payload, version: 2 } });
+
+  assert.deepEqual(harness.outbound.at(-1), { error: "unsupported_context_version" });
+  assert.deepEqual(await harness.ContextStore.get(harness.sessionId), stored);
+  assert.equal(harness.provider.calls.length, 1);
 });
 
 test("malformed client frames are rejected without side effects and the socket stays usable", async () => {
