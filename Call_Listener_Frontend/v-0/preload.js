@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("callApi", {
   getWsUrl: () => ipcRenderer.invoke("auth:getWsUrl"),
   getPlatformCapabilities: () => ipcRenderer.invoke("platform:getCapabilities"),
   getModels: () => ipcRenderer.invoke("models:list"),
+  // Renderer-safe diagnostics snapshot (no host identifiers, no paths).
+  getDiagnostics: () => ipcRenderer.invoke("diagnostics:get"),
 });
 
 // Optional: silence console output from renderer in production

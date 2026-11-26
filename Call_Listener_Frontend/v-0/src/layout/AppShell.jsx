@@ -1,12 +1,13 @@
 // FILE: src/layout/AppShell.jsx
 import React, { useEffect } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useUI } from "@/ui/UIContext.jsx";
-import { Moon, Sun } from "lucide-react";
+import { Activity, Moon, Sun } from "lucide-react";
 
 export default function AppShell() {
   const { title, actions, toggleTheme, theme, setTitle, setActions } = useUI();
   const { pathname } = useLocation();
+  const nav = useNavigate();
 
   // Default title per route (pages can override in useEffect)
   useEffect(() => {
@@ -23,6 +24,10 @@ export default function AppShell() {
         ? "Authentication"
         : pathname === "/unsupported"
         ? "Unsupported OS"
+        : pathname === "/diagnostics"
+        ? "Diagnostics"
+        : pathname === "/connecting"
+        ? "Connecting"
         : "Call Listener";
     setTitle(routeTitle);
     if (pathname !== "/conversation") setActions(null);
@@ -42,6 +47,16 @@ export default function AppShell() {
 
         <div className="app-no-drag flex items-center gap-2">
           {actions}
+          {pathname !== "/diagnostics" && (
+            <button
+              className="btn btn-ghost h-8 px-2"
+              onClick={() => nav("/diagnostics")}
+              aria-label="Open diagnostics"
+              title="Diagnostics"
+            >
+              <Activity size={16} />
+            </button>
+          )}
           <button
             className="btn btn-ghost h-8 px-2"
             onClick={toggleTheme}
