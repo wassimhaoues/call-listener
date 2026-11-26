@@ -49,7 +49,17 @@ if (-not $alive) {
 }
 Write-Host "App running: $($alive.Count) process(es)"
 
-$userData = Join-Path $env:APPDATA "Call Listener"
+# Electron names the user-data directory after the app name: package.json
+# "name" (call-listener) unless a top-level productName is set.
+$userData = @("call-listener", "Call Listener") |
+  ForEach-Object { Join-Path $env:APPDATA $_ } |
+  Where-Object { Test-Path (Join-Path $_ "installation-id") } |
+  Select-Object -First 1
+if (-not $userData) {
+  Get-ChildItem $env:APPDATA -Directory | Select-Object -ExpandProperty Name | Write-Host
+  throw "No user-data directory with an installation-id under $env:APPDATA"
+}
+Write-Host "User data: $userData"
 $idFile = Join-Path $userData "installation-id"
 $secretFile = Join-Path $userData "device-secret.bin"
 # Created at startup by services/deviceCredentials.js; the secret is
