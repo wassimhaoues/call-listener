@@ -91,7 +91,6 @@ function withTimeout(promise, timeoutMs) {
       error.code = "ETIMEDOUT";
       reject(error);
     }, timeoutMs);
-    timer.unref?.();
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
