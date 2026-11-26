@@ -59,3 +59,45 @@ test("rejects invalid budget configuration and usage values", async () => {
     /usage token counts/
   );
 });
+
+test("charges a conservative estimate and warns when the provider reports no usage", async () => {
+  const warnings = [];
+  const budget = createInterviewBudget({
+    redisClient: createRedis(),
+    maxUsd: 1,
+    inputUsdPerMillionTokens: 0.2,
+    outputUsdPerMillionTokens: 1.2,
+    log: { debug() {}, warn: (message) => warnings.push(message) },
+  });
+
+  const result = await budget.recordUsage("session-1", undefined, { inputChars: 4_001, outputChars: 400 });
+  // ceil(4001 / 4) = 1001 input tokens, ceil(400 / 4) = 100 output tokens.
+  assert.equal(result.estimated, true);
+  assert.ok(Math.abs(result.costUsd - (1001 * 0.2 + 100 * 1.2) / 1_000_000) < 1e-15);
+  assert.ok(result.costUsd > 0, "missing usage is never recorded as free");
+  assert.equal((await budget.canGenerate("session-1")).spentUsd, result.costUsd);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /no usage/);
+  assert.match(warnings[0], /1001 input \/ 100 output/);
+});
+
+test("estimates only the token count the provider omitted", async () => {
+  const warnings = [];
+  const budget = createInterviewBudget({
+    redisClient: createRedis(),
+    maxUsd: 1,
+    inputUsdPerMillionTokens: 0.2,
+    outputUsdPerMillionTokens: 1.2,
+    log: { debug() {}, warn: (message) => warnings.push(message) },
+  });
+
+  const partial = await budget.recordUsage("session-1", { prompt_tokens: 1_000 }, { inputChars: 99_999, outputChars: 40 });
+  assert.equal(partial.estimated, true);
+  assert.ok(Math.abs(partial.costUsd - (1000 * 0.2 + 10 * 1.2) / 1_000_000) < 1e-15);
+  assert.match(warnings[0], /no output usage/);
+
+  const reported = await budget.recordUsage("session-1", { input_tokens: 10, output_tokens: 0 }, { inputChars: 4_000, outputChars: 4_000 });
+  assert.equal(reported.estimated, false, "a reported zero is not replaced by an estimate");
+  assert.ok(Math.abs(reported.costUsd - (10 * 0.2) / 1_000_000) < 1e-15);
+  assert.equal(warnings.length, 1);
+});

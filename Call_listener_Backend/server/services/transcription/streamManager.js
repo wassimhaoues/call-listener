@@ -235,7 +235,7 @@ export class StreamManager {
           context: contextStr,
           history: historyStr,
           signal: generationController.signal,
-          onUsage: (usage) => this.Budget?.recordUsage(this.sessionId, usage),
+          onUsage: (usage, estimateBasis) => this.Budget?.recordUsage(this.sessionId, usage, estimateBasis),
           model: selectedModel,
           onModel: (info) => { modelInfo = info; },
         }),

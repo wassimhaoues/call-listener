@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createReplayHarness } from "./helpers/replayHarness.js";
 import { createReplayMetrics, createFakeClock } from "./helpers/replayMetrics.js";
-import { loadContexts, loadFixture, loadProviderResponses } from "./helpers/fixtures.js";
+import { estimatedCostUsd, loadContexts, loadFixture, loadProviderResponses } from "./helpers/fixtures.js";
 
 const contexts = loadContexts();
 const { responses } = loadProviderResponses();
@@ -92,8 +92,19 @@ for (const path of SESSIONS) {
     assert.equal(harness.provider.pendingCount(), 0, "no provider request left in flight after end");
 
     assert.deepEqual(harness.usageCalls, final.usage);
+    // `final.spentUsd` is the reported-usage spend; replies listed in
+    // `final.estimatedUsage` reported none and are charged a char-based estimate.
+    const estimatedCalls = harness.provider.calls.filter((call) =>
+      call.status === "resolved" && (final.estimatedUsage || []).includes(call.name));
+    assert.equal(estimatedCalls.length, (final.estimatedUsage || []).length);
+    assert.equal(harness.estimatedUsage.length, estimatedCalls.length, "every usage-less reply is charged an estimate");
+    const expectedSpentUsd = final.spentUsd + estimatedCalls.reduce(
+      (sum, call) => sum + estimatedCostUsd(call, responses[call.name], session.harness),
+      0
+    );
     const { spentUsd } = await harness.Budget.canGenerate(harness.sessionId);
-    assert.ok(Math.abs(spentUsd - final.spentUsd) < 1e-12, `spent ${spentUsd}, expected ${final.spentUsd}`);
+    assert.ok(Math.abs(spentUsd - expectedSpentUsd) < 1e-12, `spent ${spentUsd}, expected ${expectedSpentUsd}`);
+    if (estimatedCalls.length) assert.ok(spentUsd > final.spentUsd, "missing usage is not recorded as free");
 
     const steps = metrics.steps();
     assert.equal(steps.length, session.steps.length);
