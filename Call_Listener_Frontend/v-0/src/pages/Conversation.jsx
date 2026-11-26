@@ -17,6 +17,8 @@ import {
 import {
   captureFailed,
   captureStarted,
+  CONNECTION,
+  CONNECTION_LOST_TEXT,
   conversationReducer,
   initialConversationState,
   noticeShown,
@@ -181,6 +183,7 @@ export default function Conversation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const connectionLost = state.connection === CONNECTION.LOST;
   const alerts = [
     state.captureError,
     state.modelUnavailable ? UNSUPPORTED_MODEL_TEXT : "",
@@ -188,6 +191,17 @@ export default function Conversation() {
 
   return (
     <div className="h-full flex flex-col">
+      {connectionLost && (
+        <div
+          className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--danger)] px-3 py-2 text-sm text-[var(--danger)]"
+          role="alert"
+        >
+          <p>{CONNECTION_LOST_TEXT}</p>
+          <Button className="h-8" variant="secondary" onClick={() => socket.startNewSession()}>
+            Start new session
+          </Button>
+        </div>
+      )}
       <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[2.1fr_1fr] gap-3">
         <Card className="min-h-0 flex flex-col">
           <CardHeader>Conversation</CardHeader>
