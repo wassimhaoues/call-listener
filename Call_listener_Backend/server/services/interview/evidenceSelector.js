@@ -4,7 +4,11 @@ const STOP_WORDS = new Set(["about", "with", "that", "this", "from", "your", "ha
 
 function tokens(value) {
   return new Set(
-    String(value || "").toLowerCase().match(/[\p{L}\p{N}.+#/-]{3,}/gu)?.filter((token) => !STOP_WORDS.has(token)) || []
+    (String(value || "").toLowerCase().match(/[\p{L}\p{N}.+#/-]{3,}/gu) || [])
+      // Sentence punctuation is not part of a term: "migration." must match
+      // "migration", while "node.js", "c++", and "c#" stay intact.
+      .map((token) => token.replace(/[./-]+$/u, ""))
+      .filter((token) => token.length >= 3 && !STOP_WORDS.has(token))
   );
 }
 

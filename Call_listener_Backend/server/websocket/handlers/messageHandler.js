@@ -87,10 +87,12 @@ export function createMessageHandler({
           sendJson(wsClient, { error: "unsupported_model" });
           return;
         }
-        await ContextStore.set(sessionId, context);
+        // Validate the language switch before storing, so a rejected context
+        // cannot replace the one the active streams were opened with.
         streamManager.setTranscriptionLanguage?.(
           context.settings?.transcriptionLanguage || context.settings?.language || "fr"
         );
+        await ContextStore.set(sessionId, context);
         if (Budget && !(await Budget.canGenerate(sessionId)).allowed) {
           sendJson(wsClient, { error: "interview_budget_reached" });
           return;

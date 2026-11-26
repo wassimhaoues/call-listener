@@ -20,6 +20,7 @@ Use OpenRouter for selectable language models, LangChain for model integration a
 7. [Decisions and technical references](07-decisions-and-references.md)
 8. [Linux desktop support](08-linux-support.md)
 9. [Implementation status](STATUS.md)
+10. [Backend fixtures and session replay](fixtures.md)
 
 ## Delivery sequence
 

@@ -1,0 +1,169 @@
+{
+  "id": "en-two-channel-v1",
+  "description": "Synthetic English technical interview over mic (candidate) and system (interviewer) channels. Covers intro, interim/final/utterance-end transcripts, an acknowledgement, a superseded question, a typed question, a provider failure, and end with pending work.",
+  "harness": {},
+  "steps": [
+    {
+      "label": "context with intro suggestion",
+      "type": "context",
+      "context": "validEn",
+      "provider": "introSuccess",
+      "expect": [{ "ai_reply": "Open with your billing migration: scope, risk, and the zero-data-loss result.", "model": { "selected": "fixture/model", "actual": null } }]
+    },
+    {
+      "label": "malformed frame mid-session keeps the socket usable",
+      "type": "raw",
+      "data": "{not json",
+      "expect": [{ "error": "Invalid message" }]
+    },
+    { "label": "interviewer audio starts", "type": "audio", "source": "system", "bytes": 1920, "count": 2, "expect": [] },
+    { "label": "candidate audio starts", "type": "audio", "source": "mic", "bytes": 1920, "count": 2, "expect": [] },
+    {
+      "label": "context resend with another transcription language is rejected during capture",
+      "type": "context",
+      "context": "validFr",
+      "expect": [{ "error": "Invalid message" }]
+    },
+    { "label": "greeting interim", "type": "transcript", "source": "system", "text": "Thanks for", "isFinal": false, "expect": [] },
+    { "label": "greeting final", "type": "transcript", "source": "system", "text": "Thanks for joining today.", "isFinal": true, "expect": [] },
+    {
+      "label": "greeting utterance end",
+      "type": "utteranceEnd",
+      "source": "system",
+      "expect": [{ "speaker": "caller", "transcript": "Thanks for joining today." }]
+    },
+    { "label": "question 1 interim", "type": "transcript", "source": "system", "text": "Tell me about", "isFinal": false, "expect": [] },
+    { "label": "question 1 final part 1", "type": "transcript", "source": "system", "text": "Tell me about a time", "isFinal": true, "expect": [] },
+    { "label": "candidate interim overlaps the interviewer", "type": "transcript", "source": "mic", "text": "Mm", "isFinal": false, "expect": [] },
+    { "label": "question 1 final part 2", "type": "transcript", "source": "system", "text": "you led a migration.", "isFinal": true, "expect": [] },
+    {
+      "label": "question 1 utterance end generates guidance",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "migrationAnswer",
+      "providerPromptIncludes": ["Requirement: Database migrations", "Preferred answer length: short"],
+      "providerPromptExcludes": ["Requirement: Incident response"],
+      "providerHistoryEndsWith": "caller: Tell me about a time you led a migration.",
+      "expect": [
+        { "speaker": "caller", "transcript": "Tell me about a time you led a migration." },
+        { "generation": { "state": "thinking" } },
+        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss.", "model": { "selected": "fixture/model", "actual": null } }
+      ]
+    },
+    { "label": "candidate answer part 1", "type": "transcript", "source": "mic", "text": "I led the move of our billing service", "isFinal": true, "expect": [] },
+    { "label": "candidate answer part 2", "type": "transcript", "source": "mic", "text": "to managed PostgreSQL.", "isFinal": true, "expect": [] },
+    {
+      "label": "candidate utterance end never triggers guidance",
+      "type": "utteranceEnd",
+      "source": "mic",
+      "expect": [{ "speaker": "you", "transcript": "I led the move of our billing service to managed PostgreSQL." }]
+    },
+    { "label": "acknowledgement final", "type": "transcript", "source": "system", "text": "Got it.", "isFinal": true, "expect": [] },
+    {
+      "label": "acknowledgement is transcribed but skipped by the classifier",
+      "type": "utteranceEnd",
+      "source": "system",
+      "expect": [{ "speaker": "caller", "transcript": "Got it." }]
+    },
+    { "label": "question 2 final", "type": "transcript", "source": "system", "text": "How did you keep the cutover safe?", "isFinal": true, "expect": [] },
+    {
+      "label": "question 2 starts a generation that stays in flight",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "hangUntilAborted",
+      "waitFor": "providerPending",
+      "expect": [
+        { "speaker": "caller", "transcript": "How did you keep the cutover safe?" },
+        { "generation": { "state": "thinking" } }
+      ]
+    },
+    {
+      "label": "question 3 final",
+      "type": "transcript",
+      "source": "system",
+      "text": "Actually, what would you do differently next time?",
+      "isFinal": true,
+      "expect": []
+    },
+    {
+      "label": "question 3 supersedes question 2 (latest question wins)",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "missingUsage",
+      "expect": [
+        { "speaker": "caller", "transcript": "Actually, what would you do differently next time?" },
+        { "generation": { "state": "thinking" } },
+        { "ai_reply": "I would rehearse the rollback earlier and automate it.", "model": { "selected": "fixture/model", "actual": null } }
+      ]
+    },
+    {
+      "label": "typed question hits a 429",
+      "type": "typed",
+      "text": "Why do you want to join this team?",
+      "provider": "rateLimited",
+      "expect": [
+        { "speaker": "caller", "transcript": "Why do you want to join this team?" },
+        { "generation": { "state": "thinking" } },
+        { "generation": { "state": "failed" }, "ai_reply": "[Erreur du modèle]" }
+      ]
+    },
+    { "label": "candidate keeps talking after the failure", "type": "transcript", "source": "mic", "text": "I am excited about the platform work.", "isFinal": true, "expect": [] },
+    {
+      "label": "transcription survives the provider failure",
+      "type": "utteranceEnd",
+      "source": "mic",
+      "expect": [{ "speaker": "you", "transcript": "I am excited about the platform work." }]
+    },
+    { "label": "closing question final", "type": "transcript", "source": "system", "text": "Do you have any questions for us?", "isFinal": true, "expect": [] },
+    {
+      "label": "closing question is still generating at end",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "hangUntilAborted",
+      "waitFor": "providerPending",
+      "expect": [
+        { "speaker": "caller", "transcript": "Do you have any questions for us?" },
+        { "generation": { "state": "thinking" } }
+      ]
+    },
+    { "label": "end aborts pending work without output", "type": "end", "expect": [] },
+    { "label": "late transcript after end", "type": "transcript", "source": "system", "text": "One more thing: why this role?", "isFinal": true, "expect": [] },
+    { "label": "late utterance end after end", "type": "utteranceEnd", "source": "system", "expect": [] },
+    { "label": "audio after end", "type": "audio", "source": "mic", "bytes": 1920, "count": 1, "expect": [] },
+    { "label": "typed question after end", "type": "typed", "text": "Are you still there?", "expect": [] }
+  ],
+  "final": {
+    "streams": [
+      { "label": "system", "language": "en", "chunks": 2, "finishCalls": 1 },
+      { "label": "mic", "language": "en", "chunks": 2, "finishCalls": 1 }
+    ],
+    "storedTranscriptionLanguage": "en",
+    "history": [
+      ["caller", "Thanks for joining today."],
+      ["caller", "Tell me about a time you led a migration."],
+      ["assistant", "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss."],
+      ["you", "I led the move of our billing service to managed PostgreSQL."],
+      ["caller", "Got it."],
+      ["caller", "How did you keep the cutover safe?"],
+      ["caller", "Actually, what would you do differently next time?"],
+      ["assistant", "I would rehearse the rollback earlier and automate it."],
+      ["caller", "Why do you want to join this team?"],
+      ["you", "I am excited about the platform work."],
+      ["caller", "Do you have any questions for us?"]
+    ],
+    "providerCalls": [
+      { "name": "introSuccess", "status": "resolved" },
+      { "name": "migrationAnswer", "status": "resolved" },
+      { "name": "hangUntilAborted", "status": "rejected" },
+      { "name": "missingUsage", "status": "resolved" },
+      { "name": "rateLimited", "status": "rejected" },
+      { "name": "hangUntilAborted", "status": "rejected" }
+    ],
+    "usage": [
+      { "input_tokens": 900, "output_tokens": 60, "total_tokens": 960 },
+      { "input_tokens": 1200, "output_tokens": 150, "total_tokens": 1350 },
+      null
+    ],
+    "spentUsd": 0.000672
+  }
+}

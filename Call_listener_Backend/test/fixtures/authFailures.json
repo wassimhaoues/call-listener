@@ -1,0 +1,72 @@
+{
+  "_comment": "WebSocket authentication cases. The signing secret is generated per test run; `APP_ID` is a fictional identifier. `sign` overrides jsonwebtoken options, `claims` overrides the default { app_id, device_id } payload.",
+  "config": { "APP_ID": "com.example.calllistener.fixture" },
+  "defaultClaims": { "app_id": "com.example.calllistener.fixture", "device_id": "fixture-device-0001" },
+  "cases": [
+    {
+      "name": "valid query token (control)",
+      "transport": "query",
+      "expect": { "code": 1000, "reason": "accepted", "handlerReached": true }
+    },
+    {
+      "name": "valid cookie token (control)",
+      "transport": "cookie",
+      "expect": { "code": 1000, "reason": "accepted", "handlerReached": true }
+    },
+    { "name": "no token", "transport": "none", "expect": { "code": 4001, "reason": "auth_required" } },
+    {
+      "name": "cookie with malformed percent-encoding",
+      "transport": "cookie",
+      "rawToken": "%E0%A4%A",
+      "expect": { "code": 4001, "reason": "auth_required" }
+    },
+    {
+      "name": "query token that is not a JWT",
+      "transport": "query",
+      "rawToken": "not-a-jwt",
+      "expect": { "code": 4001, "reason": "auth_failed" }
+    },
+    {
+      "name": "unsigned alg=none token",
+      "transport": "query",
+      "unsigned": true,
+      "expect": { "code": 4001, "reason": "auth_failed" }
+    },
+    {
+      "name": "token signed with a different secret",
+      "transport": "query",
+      "wrongSecret": true,
+      "expect": { "code": 4001, "reason": "auth_failed" }
+    },
+    {
+      "name": "wrong issuer",
+      "transport": "cookie",
+      "sign": { "issuer": "someone-else" },
+      "expect": { "code": 4001, "reason": "auth_failed" }
+    },
+    {
+      "name": "wrong audience",
+      "transport": "query",
+      "sign": { "audience": "browser-client" },
+      "expect": { "code": 4001, "reason": "auth_failed" }
+    },
+    {
+      "name": "expired token",
+      "transport": "query",
+      "sign": { "expiresIn": -60 },
+      "expect": { "code": 4001, "reason": "auth_failed" }
+    },
+    {
+      "name": "foreign app id",
+      "transport": "query",
+      "claims": { "app_id": "com.example.other-app" },
+      "expect": { "code": 4001, "reason": "auth_failed" }
+    },
+    {
+      "name": "missing device id",
+      "transport": "cookie",
+      "claims": { "device_id": null },
+      "expect": { "code": 4001, "reason": "auth_failed" }
+    }
+  ]
+}

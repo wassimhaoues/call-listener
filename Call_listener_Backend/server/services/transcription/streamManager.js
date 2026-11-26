@@ -52,8 +52,8 @@ export class StreamManager {
     this.ContextStore = ContextStore;
     this.generateReply = generateReply;
     this.buildPrompt = buildPrompt;
-    this.runInterviewWorkflow = runInterviewWorkflow || (async ({ context, history, signal, model, onModel }) =>
-      this.generateReply(this.buildPrompt(context, "reply"), history, { signal, model, onModel }));
+    this.runInterviewWorkflow = runInterviewWorkflow || (async ({ context, history, signal, model, onModel, onUsage }) =>
+      this.generateReply(this.buildPrompt(context, "reply"), history, { signal, model, onModel, onUsage }));
     this.Budget = Budget;
     this.log = log;
     this.streams = {};

@@ -152,6 +152,33 @@ test("does not generate an introduction after the session budget is exhausted", 
   assert.deepEqual(sent, [{ error: "interview_budget_reached" }]);
 });
 
+test("a context rejected for changing language mid-capture does not replace the stored context", async () => {
+  const stored = [];
+  const sent = [];
+  let generated = false;
+  const handler = createMessageHandler({
+    ChatHistory: { toPrompt: async () => "" },
+    ContextStore: { set: async (_sessionId, context) => stored.push(context) },
+    buildPrompt: () => "prompt",
+    generateReply: async () => { generated = true; return "unused"; },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  await handler({
+    wsClient: { OPEN: 1, readyState: 1, send: (payload) => sent.push(JSON.parse(payload)) },
+    sessionId: "session-1",
+    data: Buffer.from(JSON.stringify({ context: { settings: { transcriptionLanguage: "fr" } } })),
+    streamManager: {
+      setTranscriptionLanguage: () => {
+        throw new Error("cannot change transcription language during capture");
+      },
+    },
+  });
+
+  assert.deepEqual(stored, []);
+  assert.equal(generated, false);
+  assert.deepEqual(sent, [{ error: "Invalid message" }]);
+});
+
 test("normalizes audio and initializes listeners once per received message", async () => {
   const harness = createHarness();
 

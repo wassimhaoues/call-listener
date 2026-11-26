@@ -1,0 +1,84 @@
+{
+  "id": "en-budget-exhausted-v1",
+  "description": "Synthetic English session with a tiny USD 0.0005 ceiling: the intro and first answer are paid, then further questions are refused while transcription continues.",
+  "harness": { "maxUsd": 0.0005 },
+  "steps": [
+    {
+      "label": "context with intro suggestion (USD 0.000252)",
+      "type": "context",
+      "context": "validEn",
+      "provider": "introSuccess",
+      "expect": [{ "ai_reply": "Open with your billing migration: scope, risk, and the zero-data-loss result.", "model": { "selected": "fixture/model", "actual": null } }]
+    },
+    { "label": "interviewer audio starts", "type": "audio", "source": "system", "bytes": 1920, "count": 1, "expect": [] },
+    { "label": "question 1 final", "type": "transcript", "source": "system", "text": "Tell me about a time you led a migration.", "isFinal": true, "expect": [] },
+    {
+      "label": "question 1 is answered and crosses the ceiling (total USD 0.000672)",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "migrationAnswer",
+      "expect": [
+        { "speaker": "caller", "transcript": "Tell me about a time you led a migration." },
+        { "generation": { "state": "thinking" } },
+        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss.", "model": { "selected": "fixture/model", "actual": null } }
+      ]
+    },
+    { "label": "question 2 final", "type": "transcript", "source": "system", "text": "How did you keep the cutover safe?", "isFinal": true, "expect": [] },
+    {
+      "label": "question 2 is refused without a provider call",
+      "type": "utteranceEnd",
+      "source": "system",
+      "expect": [
+        { "speaker": "caller", "transcript": "How did you keep the cutover safe?" },
+        { "error": "interview_budget_reached" }
+      ]
+    },
+    {
+      "label": "typed question is refused the same way",
+      "type": "typed",
+      "text": "What would you do differently?",
+      "expect": [
+        { "speaker": "caller", "transcript": "What would you do differently?" },
+        { "error": "interview_budget_reached" }
+      ]
+    },
+    { "label": "candidate audio starts", "type": "audio", "source": "mic", "bytes": 1920, "count": 1, "expect": [] },
+    { "label": "candidate answer final", "type": "transcript", "source": "mic", "text": "I would automate the rollback.", "isFinal": true, "expect": [] },
+    {
+      "label": "transcription continues after the ceiling",
+      "type": "utteranceEnd",
+      "source": "mic",
+      "expect": [{ "speaker": "you", "transcript": "I would automate the rollback." }]
+    },
+    {
+      "label": "a context resend cannot buy another intro",
+      "type": "context",
+      "context": "validEn",
+      "expect": [{ "error": "interview_budget_reached" }]
+    },
+    { "label": "end", "type": "end", "expect": [] }
+  ],
+  "final": {
+    "streams": [
+      { "label": "system", "language": "en", "chunks": 1, "finishCalls": 1 },
+      { "label": "mic", "language": "en", "chunks": 1, "finishCalls": 1 }
+    ],
+    "storedTranscriptionLanguage": "en",
+    "history": [
+      ["caller", "Tell me about a time you led a migration."],
+      ["assistant", "Situation: a legacy billing database. Action: staged dual writes. Result: zero data loss."],
+      ["caller", "How did you keep the cutover safe?"],
+      ["caller", "What would you do differently?"],
+      ["you", "I would automate the rollback."]
+    ],
+    "providerCalls": [
+      { "name": "introSuccess", "status": "resolved" },
+      { "name": "migrationAnswer", "status": "resolved" }
+    ],
+    "usage": [
+      { "input_tokens": 900, "output_tokens": 60, "total_tokens": 960 },
+      { "input_tokens": 1200, "output_tokens": 150, "total_tokens": 1350 }
+    ],
+    "spentUsd": 0.000672
+  }
+}

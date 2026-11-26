@@ -1,0 +1,55 @@
+{
+  "_comment": "Client frames the backend must reject without opening a transcription stream or calling a provider. `raw` is sent verbatim; `message` is JSON-encoded first.",
+  "cases": [
+    { "name": "non-JSON text", "raw": "not-json", "expect": [{ "error": "Invalid message" }] },
+    { "name": "truncated JSON", "raw": "{\"source\":\"mic\",", "expect": [{ "error": "Invalid message" }] },
+    { "name": "JSON null", "raw": "null", "expect": [{ "error": "Invalid message" }] },
+    { "name": "JSON number", "raw": "42", "expect": [{ "error": "Invalid message" }] },
+    { "name": "JSON array", "raw": "[1,2,3]", "expect": [{ "error": "Invalid message" }] },
+    { "name": "empty object", "message": {}, "expect": [{ "error": "Invalid message" }] },
+    { "name": "empty-string context", "message": { "context": "" }, "expect": [{ "error": "Invalid message" }] },
+    { "name": "end flag set to false", "message": { "end": false }, "expect": [{ "error": "Invalid message" }] },
+    {
+      "name": "unknown audio source label",
+      "message": { "source": "speaker", "chunk": "AAE=" },
+      "expect": [{ "error": "Invalid message" }]
+    },
+    { "name": "audio without chunk", "message": { "source": "mic" }, "expect": [{ "error": "Invalid message" }] },
+    { "name": "empty base64 chunk", "message": { "source": "mic", "chunk": "" }, "expect": [{ "error": "Invalid message" }] },
+    {
+      "name": "base64 chunk with no decodable bytes",
+      "message": { "source": "mic", "chunk": "!!!!" },
+      "expect": [{ "error": "Unsupported audio chunk type" }]
+    },
+    {
+      "name": "empty Buffer-JSON chunk",
+      "message": { "source": "system", "chunk": { "type": "Buffer", "data": [] } },
+      "expect": [{ "error": "Unsupported audio chunk type" }]
+    },
+    {
+      "name": "unsupported chunk object",
+      "message": { "source": "system", "chunk": { "bytes": [1, 2] } },
+      "expect": [{ "error": "Invalid message" }]
+    },
+    {
+      "name": "audio chunk one byte over 64 KiB",
+      "message": { "source": "mic", "chunk": { "$base64Zeros": 65537 } },
+      "expect": [{ "error": "Audio chunk too large" }]
+    },
+    {
+      "name": "blank typed question",
+      "message": { "interviewer_question": "   " },
+      "expect": [{ "error": "Invalid message" }]
+    },
+    {
+      "name": "typed question over 2,000 characters",
+      "message": { "interviewer_question": { "$repeat": "a", "times": 2001 } },
+      "expect": [{ "error": "Invalid message" }]
+    },
+    {
+      "name": "non-string typed question",
+      "message": { "interviewer_question": 42 },
+      "expect": [{ "error": "Invalid message" }]
+    }
+  ]
+}
