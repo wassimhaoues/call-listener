@@ -16,6 +16,44 @@ export function getDeviceSelectionError({ micId, sysId, systemAudioEnabled }) {
   return null;
 }
 
+// getUserMedia failure tagged with the capture source ("mic" | "system").
+// `name` mirrors the underlying DOMException name (e.g. NotAllowedError).
+export class CaptureError extends Error {
+  constructor(source, cause) {
+    super(cause?.message || "Audio capture failed", { cause });
+    this.name = cause?.name || "Error";
+    this.source = source;
+  }
+}
+
+const SOURCE_LABELS = {
+  mic: "microphone",
+  system: "interviewer (system) audio device",
+};
+const SOURCE_CAPTURE_LABELS = {
+  mic: "microphone",
+  system: "interviewer (system) audio",
+};
+
+// Candidate-facing explanation of why audio capture could not start.
+export function describeCaptureError(error) {
+  const source = error?.source === "system" ? "system" : "mic";
+  switch (error?.name) {
+    case "NotAllowedError":
+    case "SecurityError":
+      return "Microphone access was denied. Allow microphone access for Call Listener in your system privacy settings, then start the interview again.";
+    case "NotFoundError":
+    case "OverconstrainedError":
+      return `The selected ${SOURCE_LABELS[source]} was not found. Reconnect it or choose another device in Setup.`;
+    case "NotReadableError":
+      return `The selected ${SOURCE_LABELS[source]} is in use by another application or could not be opened. Close other apps using it and try again.`;
+    default: {
+      const detail = error?.name && error.name !== "Error" ? ` (${error.name})` : "";
+      return `Could not start ${SOURCE_CAPTURE_LABELS[source]} capture${detail}. Check your audio devices and try again.`;
+    }
+  }
+}
+
 // The candidate microphone keeps browser voice processing; the interviewer
 // (system) loopback must stay unprocessed.
 export function microphoneConstraints(deviceId) {

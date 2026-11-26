@@ -50,3 +50,21 @@ it("does not present stale guidance while a newer answer is being prepared", () 
   );
   expect(screen.queryByText("This is an older suggestion.")).toBeNull();
 });
+
+it("shows the model subtly, and both names when the provider served another", () => {
+  const { rerender } = render(
+    <LiveGuidancePanel question="" suggestion="Answer." model={{ selected: "a/one", actual: "a/one" }} />
+  );
+  expect(screen.getByText("Model: a/one")).toBeInTheDocument();
+  rerender(
+    <LiveGuidancePanel question="" suggestion="Answer." model={{ selected: "a/one", actual: "b/two" }} />
+  );
+  expect(screen.getByText("Model: b/two (requested a/one)")).toBeInTheDocument();
+  rerender(<LiveGuidancePanel question="" suggestion="Answer." model={null} />);
+  expect(screen.queryByText(/^Model:/)).toBeNull();
+});
+
+it("renders session alerts as text", () => {
+  render(<LiveGuidancePanel question="" suggestion="" alerts={["<b>Blocked</b>"]} />);
+  expect(screen.getByRole("alert")).toHaveTextContent("<b>Blocked</b>");
+});

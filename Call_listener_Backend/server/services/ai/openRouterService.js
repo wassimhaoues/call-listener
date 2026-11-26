@@ -88,7 +88,12 @@ export function createOpenRouterReplyGenerator({
         { signal: deadline.signal }
       );
       const text = contentToText(response.content);
-      await onUsage?.(response.usage_metadata || response.response_metadata?.usage);
+      // The character counts let the budget charge a conservative estimate
+      // when the provider omits usage; they carry no transcript text.
+      await onUsage?.(response.usage_metadata || response.response_metadata?.usage, {
+        inputChars: String(systemPrompt ?? "").length + String(formattedHistory ?? "").length,
+        outputChars: text.length,
+      });
       onModel?.({ selected: selectedModel, actual: actualModelFrom(response) });
       log?.info(`OpenRouter reply generated (${text.length} chars)`);
       return text;

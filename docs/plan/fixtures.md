@@ -6,7 +6,7 @@ Phase 0 (P0-03 / P0-05) regression coverage for the backend. Every fixture is **
 
 | Path | Contents |
 | --- | --- |
-| `fixtures/contexts.json` | Valid English, French, and mixed-language candidate/job contexts; a legacy `caller`/`me` payload; invalid/oversized cases built from a base plus overrides; documented quirks (an unknown `version` currently parses as an empty legacy context). |
+| `fixtures/contexts.json` | Valid English, French, and mixed-language candidate/job contexts; a legacy `caller`/`me` payload; invalid/oversized cases built from a base plus overrides; unsupported `version` cases that must be rejected with `unsupported_context_version`. |
 | `fixtures/sessions/*.json` | Scripted sessions as ordered steps. Each step lists the exact client messages it must produce, plus the provider response it consumes. A `final` block covers streams, stored context language, chat history, provider calls, usage, and spend. |
 | `fixtures/malformedMessages.json` | Frames that must be rejected without opening a stream or calling a provider. |
 | `fixtures/authFailures.json` | WebSocket authentication cases (missing, malformed, unsigned, wrong secret/issuer/audience, expired, foreign app, missing device) plus valid query/cookie controls. The signing secret is generated per run. |
@@ -35,7 +35,7 @@ npm run test:integration                   # includes authFailures.integration (
 node --test test/sessionReplay.test.js     # replays only; step timings appear as diagnostics
 ```
 
-`sessionReplay.test.js` contains one `todo` test: an intro suggestion that finishes after `end` is still sent, because the intro path has no lifecycle guard or abort signal yet (Phase 1). It is reported as todo and does not fail the suite.
+`sessionReplay.test.js` also covers the intro lifecycle: an intro that would finish after `end` is aborted and never sent, a context after `end` starts no intro, and a newer context supersedes an in-flight intro. Sessions list usage-less replies in `final.estimatedUsage`; `final.spentUsd` is the reported-usage spend, and the test adds the `ceil(chars / 4)` estimate for each listed reply.
 
 ## Adding a scenario
 

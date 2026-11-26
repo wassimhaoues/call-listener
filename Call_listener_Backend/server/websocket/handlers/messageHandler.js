@@ -48,6 +48,22 @@ function toAudioBuffer(chunk) {
 }
 
 /**
+ * Use the stream manager's intro lifecycle when it has one; a minimal stream
+ * manager (as in protocol tests) gets an always-current local controller.
+ */
+function beginIntro(streamManager) {
+  if (typeof streamManager?.beginIntroGeneration === "function") {
+    return streamManager.beginIntroGeneration();
+  }
+  const controller = new AbortController();
+  return {
+    signal: controller.signal,
+    isCurrent: () => !controller.signal.aborted,
+    finish: () => {},
+  };
+}
+
+/**
  * Create the message handler with explicit dependencies so protocol tests can
  * run without Redis, transcription, or a model-provider connection.
  */
@@ -78,7 +94,19 @@ export function createMessageHandler({
       const msg = JSON.parse(data.toString());
       if (msg.context) {
         log.info(`📞 Received context for [${sessionId}]`);
-        const context = parseContext(msg.context);
+        let context;
+        try {
+          context = parseContext(msg.context);
+        } catch (parseError) {
+          if (parseError?.code === "unsupported_context_version") {
+            // Reject explicitly: an unknown contract must never be stored as
+            // an empty legacy context. The previous session context stays.
+            log.warn(`⚠️ Unsupported context version rejected for [${sessionId}]`);
+            sendJson(wsClient, { error: "unsupported_context_version" });
+            return;
+          }
+          throw parseError;
+        }
         const selectedModel = context.settings?.model;
         if (selectedModel !== undefined && !isModelAllowed(selectedModel)) {
           // Reject rather than silently substituting another model; the
@@ -93,21 +121,43 @@ export function createMessageHandler({
           context.settings?.transcriptionLanguage || context.settings?.language || "fr"
         );
         await ContextStore.set(sessionId, context);
-        if (Budget && !(await Budget.canGenerate(sessionId)).allowed) {
-          sendJson(wsClient, { error: "interview_budget_reached" });
-          return;
-        }
-        const systemPrompt = buildPrompt(JSON.stringify(context), "intro");
-        const historyStr = await ChatHistory.toPrompt(sessionId);
-        let modelInfo = null;
-        const aiReply = await generateReply(systemPrompt, historyStr, {
-          onUsage: (usage) => Budget?.recordUsage(sessionId, usage),
-          model: selectedModel,
-          onModel: (info) => { modelInfo = info; },
-        });
-
-        if (aiReply) {
-          sendJson(wsClient, modelInfo ? { ai_reply: aiReply, model: modelInfo } : { ai_reply: aiReply });
+        // The accepted context supersedes any in-flight intro; session end and
+        // socket close abort it through the stream manager's lifecycle.
+        const intro = beginIntro(streamManager);
+        try {
+          if (!intro.isCurrent()) return;
+          if (Budget && !(await Budget.canGenerate(sessionId)).allowed) {
+            if (intro.isCurrent()) sendJson(wsClient, { error: "interview_budget_reached" });
+            return;
+          }
+          const systemPrompt = buildPrompt(JSON.stringify(context), "intro");
+          const historyStr = await ChatHistory.toPrompt(sessionId);
+          if (!intro.isCurrent()) return;
+          let modelInfo = null;
+          let aiReply;
+          try {
+            aiReply = await generateReply(systemPrompt, historyStr, {
+              signal: intro.signal,
+              onUsage: (usage, estimateBasis) => Budget?.recordUsage(sessionId, usage, estimateBasis),
+              model: selectedModel,
+              onModel: (info) => { modelInfo = info; },
+            });
+          } catch (generationError) {
+            if (!intro.isCurrent()) {
+              log.debug?.(`Introductory suggestion aborted for [${sessionId}]`);
+              return;
+            }
+            throw generationError;
+          }
+          if (!intro.isCurrent()) {
+            log.debug?.(`Late introductory suggestion suppressed for [${sessionId}]`);
+            return;
+          }
+          if (aiReply) {
+            sendJson(wsClient, modelInfo ? { ai_reply: aiReply, model: modelInfo } : { ai_reply: aiReply });
+          }
+        } finally {
+          intro.finish();
         }
         return;
       }

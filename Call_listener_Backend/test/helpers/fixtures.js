@@ -3,6 +3,20 @@ import { readFileSync } from "node:fs";
 const FIXTURE_ROOT = new URL("../fixtures/", import.meta.url);
 
 /**
+ * Expected budget charge for a provider call whose response omits usage:
+ * ceil(chars / 4) tokens for system prompt + history and for the trimmed reply,
+ * priced at the harness rates (defaults match `createReplayHarness`).
+ */
+export function estimatedCostUsd(call, response, {
+  inputUsdPerMillionTokens = 0.2,
+  outputUsdPerMillionTokens = 1.2,
+} = {}) {
+  const inputTokens = Math.ceil((String(call.system).length + String(call.history).length) / 4);
+  const outputTokens = Math.ceil(String(response.content).trim().length / 4);
+  return (inputTokens * inputUsdPerMillionTokens + outputTokens * outputUsdPerMillionTokens) / 1_000_000;
+}
+
+/**
  * Expand compact generator directives so large or binary-ish payloads stay
  * readable in JSON:
  * - `{ "$repeat": "a", "times": 3 }` -> `"aaa"`

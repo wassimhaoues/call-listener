@@ -1,14 +1,26 @@
 import React, { useState } from "react";
 import SuggestionText from "./SuggestionText.jsx";
 
+// "Model: <actual || selected>", naming the requested model too when the
+// provider reports that a different one served the request.
+export function formatModelLabel(model) {
+  if (!model?.selected) return "";
+  const { selected, actual } = model;
+  if (!actual || actual === selected) return `Model: ${selected}`;
+  return `Model: ${actual} (requested ${selected})`;
+}
+
 export default function LiveGuidancePanel({
   question,
   suggestion,
   evidence = [],
   onSubmitTypedQuestion,
   isThinking = false,
+  model = null,
+  alerts = [],
 }) {
   const [typedQuestion, setTypedQuestion] = useState("");
+  const modelLabel = formatModelLabel(model);
 
   function submitTypedQuestion(event) {
     event.preventDefault();
@@ -20,6 +32,16 @@ export default function LiveGuidancePanel({
 
   return (
     <div className="space-y-5">
+      {alerts.length > 0 && (
+        <div
+          className="rounded-xl border border-[var(--danger)] px-3 py-2 text-sm text-[var(--danger)]"
+          role="alert"
+        >
+          {alerts.map((alert) => (
+            <p key={alert}>{alert}</p>
+          ))}
+        </div>
+      )}
       <section>
         <h2 className="text-sm font-semibold">Current interviewer question</h2>
         <p className="mt-1 text-sm text-[var(--text-2)]">
@@ -37,6 +59,9 @@ export default function LiveGuidancePanel({
             <SuggestionText text={suggestion} />
           )}
         </div>
+        {!isThinking && modelLabel && (
+          <p className="mt-1 text-xs text-[var(--text-2)]">{modelLabel}</p>
+        )}
       </section>
       <section>
         <h2 className="text-sm font-semibold">Relevant experience</h2>

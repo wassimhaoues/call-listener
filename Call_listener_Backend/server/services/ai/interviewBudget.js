@@ -1,6 +1,15 @@
 import { loggers } from "../../core/logger/index.js";
 
 const DEFAULT_TTL_SECONDS = 7_200;
+// Rough upper-leaning heuristic used only when the provider omits usage.
+export const ESTIMATED_CHARS_PER_TOKEN = 4;
+
+/** Estimate a token count from a character count: ceil(chars / 4). */
+export function estimateTokens(chars) {
+  const count = Number(chars);
+  if (!Number.isFinite(count) || count <= 0) return 0;
+  return Math.ceil(count / ESTIMATED_CHARS_PER_TOKEN);
+}
 
 function asNonNegativeNumber(value, label) {
   if (!Number.isFinite(value) || value < 0) {
@@ -43,11 +52,32 @@ export function createInterviewBudget({
       return { allowed: spentUsd < maxUsd, spentUsd, maxUsd };
     },
 
-    async recordUsage(sessionId, usage) {
-      const inputTokens = Number(usage?.input_tokens ?? usage?.prompt_tokens ?? 0);
-      const outputTokens = Number(usage?.output_tokens ?? usage?.completion_tokens ?? 0);
+    /**
+     * Record one reply's cost. When the provider omits a token count, charge a
+     * conservative estimate from `estimateBasis` ({ inputChars, outputChars })
+     * instead of silently recording zero.
+     */
+    async recordUsage(sessionId, usage, estimateBasis = {}) {
+      const reportedInput = usage?.input_tokens ?? usage?.prompt_tokens;
+      const reportedOutput = usage?.output_tokens ?? usage?.completion_tokens;
+      const estimatedInput = reportedInput === undefined || reportedInput === null;
+      const estimatedOutput = reportedOutput === undefined || reportedOutput === null;
+      const inputTokens = estimatedInput
+        ? estimateTokens(estimateBasis.inputChars)
+        : Number(reportedInput);
+      const outputTokens = estimatedOutput
+        ? estimateTokens(estimateBasis.outputChars)
+        : Number(reportedOutput);
       if (!Number.isFinite(inputTokens) || inputTokens < 0 || !Number.isFinite(outputTokens) || outputTokens < 0) {
         throw new TypeError("usage token counts must be non-negative numbers");
+      }
+      const estimated = estimatedInput || estimatedOutput;
+      if (estimated) {
+        // Metadata only: never log prompt, history, or reply text.
+        log.warn(
+          `Provider reported no ${estimatedInput && estimatedOutput ? "usage" : estimatedInput ? "input usage" : "output usage"} ` +
+          `for session [${sessionId}]; charging an estimate of ${inputTokens} input / ${outputTokens} output tokens`
+        );
       }
       const costUsd = (
         (inputTokens * inputUsdPerMillionTokens + outputTokens * outputUsdPerMillionTokens) /
@@ -58,10 +88,11 @@ export function createInterviewBudget({
         spentUsd: String(spentUsd),
         lastInputTokens: String(inputTokens),
         lastOutputTokens: String(outputTokens),
+        lastUsageEstimated: estimated ? "1" : "0",
       });
       await redisClient.expire(keyFor(sessionId), ttlSeconds);
       log.debug(`Recorded provider usage for session [${sessionId}]`);
-      return { costUsd, spentUsd, maxUsd, exhausted: spentUsd >= maxUsd };
+      return { costUsd, spentUsd, maxUsd, exhausted: spentUsd >= maxUsd, estimated };
     },
 
     async clear(sessionId) {
