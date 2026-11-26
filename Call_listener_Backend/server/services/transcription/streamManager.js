@@ -67,6 +67,9 @@ export class StreamManager {
     this.generation = 0;
     this.transcriptionLanguage = "fr";
     this.activeGenerationController = null;
+    // { id, streaming } of the generation in flight, reported as failed if the
+    // client disconnects before it completes (see pause()).
+    this.activeGeneration = null;
     this.activeIntroController = null;
     this.pendingQuestion = null;
     this.replyTimer = null;
@@ -236,6 +239,8 @@ export class StreamManager {
     const generationId = `g${this.generationSequence}`;
     // Pinned per generation: a capability change applies to the next one.
     const streaming = this.streamingEnabled;
+    const activeGeneration = { id: generationId, streaming };
+    this.activeGeneration = activeGeneration;
     const isCurrent = () =>
       !this.closed &&
       !generationController.signal.aborted &&
@@ -324,6 +329,7 @@ export class StreamManager {
       if (this.activeGenerationController === generationController) {
         this.activeGenerationController = null;
       }
+      if (this.activeGeneration === activeGeneration) this.activeGeneration = null;
       this.isResponding = false;
       this.lastReplyAt = Date.now();
       this.scheduleReply();
@@ -357,33 +363,71 @@ export class StreamManager {
     };
   }
 
-  async closeAll() {
-    if (this.closePromise) return this.closePromise;
-
-    this.closed = true;
+  /** Abort model work and drop queued questions; late output becomes stale. */
+  cancelPendingWork(reason) {
     this.generation += 1;
-    this.activeGenerationController?.abort(new Error("session closed"));
-    this.activeIntroController?.abort(new Error("session closed"));
+    this.activeGenerationController?.abort(new Error(reason));
+    this.activeIntroController?.abort(new Error(reason));
     this.activeIntroController = null;
     clearTimeout(this.replyTimer);
     this.replyTimer = null;
     this.pendingQuestion = null;
+  }
+
+  /** Detach and stop the current transcription streams. */
+  async stopStreams() {
+    const streams = Object.entries(this.streams);
+    this.streams = {};
+    this.listenersAttached = {};
+    await Promise.allSettled(
+      streams.map(async ([label, stream]) => {
+        try {
+          stream.removeAllListeners?.("utterance");
+          await stream.stop();
+          this.log.debug(`🔻 Closed [${label}] stream`);
+        } catch (error) {
+          this.log.error(`❌ Error closing [${label}] stream: %o`, error);
+        }
+      })
+    );
+  }
+
+  /**
+   * Suspend a resumable session whose client disconnected. Unlike closeAll()
+   * the session stays usable: in-flight generation and intro are aborted and
+   * never re-run, queued questions are dropped, and the transcription streams
+   * are stopped; the next audio chunk after a resume reopens them lazily.
+   *
+   * A generation that was in flight is reported as failed (`reason:
+   * "disconnected"`), so a resuming client learns it will not complete. The
+   * report is sent synchronously, before any await, so it is sequenced ahead
+   * of a resume replay.
+   */
+  async pause() {
+    if (this.closed) return;
+    const interrupted = this.activeGeneration;
+    this.activeGeneration = null;
+    this.cancelPendingWork("client disconnected");
+    if (interrupted) {
+      sendGenerationFailure(
+        this.wsClient,
+        interrupted.streaming ? interrupted.id : undefined,
+        "disconnected"
+      );
+    }
+    this.log.info(`⏸️ Pausing Deepgram streams for session [${this.sessionId}]`);
+    await this.stopStreams();
+  }
+
+  async closeAll() {
+    if (this.closePromise) return this.closePromise;
+
+    this.closed = true;
+    this.activeGeneration = null;
+    this.cancelPendingWork("session closed");
     this.closePromise = (async () => {
       this.log.info(`🧹 Closing all Deepgram streams for session [${this.sessionId}]`);
-      const streams = Object.entries(this.streams);
-      await Promise.allSettled(
-        streams.map(async ([label, stream]) => {
-          try {
-            stream.removeAllListeners?.("utterance");
-            await stream.stop();
-            this.log.debug(`🔻 Closed [${label}] stream`);
-          } catch (error) {
-            this.log.error(`❌ Error closing [${label}] stream: %o`, error);
-          }
-        })
-      );
-      this.streams = {};
-      this.listenersAttached = {};
+      await this.stopStreams();
       this.isResponding = false;
     })();
     return this.closePromise;
@@ -456,11 +500,17 @@ export function createDeltaBatcher({ flushMs, isCurrent, send }) {
   };
 }
 
-function sendGenerationFailure(wsClient, generationId) {
+function failedGeneration(generationId, reason) {
+  const generation = generationId ? { id: generationId, state: "failed" } : { state: "failed" };
+  if (reason) generation.reason = reason;
+  return generation;
+}
+
+function sendGenerationFailure(wsClient, generationId, reason) {
   if (wsClient?.readyState !== wsClient?.OPEN) return;
   try {
     wsClient.send(JSON.stringify({
-      generation: generationId ? { id: generationId, state: "failed" } : { state: "failed" },
+      generation: failedGeneration(generationId, reason),
       // Retained for older desktop clients that only understand final replies.
       ai_reply: "[Erreur du modèle]",
     }));

@@ -87,15 +87,30 @@ export function isCandidateInterviewContext(value) {
  * capability names are ignored so newer clients can talk to older servers; a
  * malformed list is rejected.
  */
-export const CLIENT_CAPABILITIES = Object.freeze(["stream"]);
+export const CLIENT_CAPABILITIES = Object.freeze(["stream", "resume"]);
 
 const ClientCapabilitiesSchema = z.array(text(32).min(1)).max(8).optional();
 
-/** @returns {{ stream: boolean }} */
+/** The validated capability names (trimmed); throws on a malformed list. */
+export function parseClientCapabilityNames(value) {
+  const isObject = value && typeof value === "object" && !Array.isArray(value);
+  const raw = isObject ? value.capabilities : undefined;
+  return ClientCapabilitiesSchema.parse(raw) ?? [];
+}
+
+/**
+ * Generation-related capabilities applied by the stream manager.
+ * @returns {{ stream: boolean }}
+ */
 export function parseClientCapabilities(value) {
-  const raw = value && typeof value === "object" && !Array.isArray(value)
-    ? value.capabilities
-    : undefined;
-  const capabilities = ClientCapabilitiesSchema.parse(raw) ?? [];
-  return { stream: capabilities.includes("stream") };
+  return { stream: parseClientCapabilityNames(value).includes("stream") };
+}
+
+/**
+ * Whether the client opts into resumable sessions (sequenced server messages,
+ * replay, and `{ resume }` on reconnect). Session-level, so it is handled by
+ * the connection lifecycle rather than the stream manager.
+ */
+export function requestsSessionResume(value) {
+  return parseClientCapabilityNames(value).includes("resume");
 }

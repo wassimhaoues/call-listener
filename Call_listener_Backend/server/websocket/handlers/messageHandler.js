@@ -1,5 +1,8 @@
 import { loggers } from "../../core/logger/index.js";
-import { parseClientCapabilities } from "../../contracts/interviewContext.js";
+import {
+  parseClientCapabilities,
+  requestsSessionResume,
+} from "../../contracts/interviewContext.js";
 
 export const MAX_AUDIO_CHUNK_BYTES = 64 * 1024;
 export const MAX_TYPED_INTERVIEWER_QUESTION_CHARS = 2_000;
@@ -75,6 +78,7 @@ export function createMessageHandler({
   buildPrompt,
   parseContext = (context) => context,
   parseCapabilities = parseClientCapabilities,
+  parseResumeCapability = requestsSessionResume,
   Budget,
   isModelAllowed = () => false,
   log = loggers.websocket,
@@ -91,6 +95,10 @@ export function createMessageHandler({
     sessionId,
     data,
     streamManager,
+    // Optional session-lifecycle hooks (see connectionLifecycle.js); protocol
+    // tests that drive the handler directly may omit them.
+    onContextAccepted,
+    onEnd,
   }) {
     try {
       const msg = JSON.parse(data.toString());
@@ -112,6 +120,7 @@ export function createMessageHandler({
         // A malformed capability list rejects the whole context frame
         // ("Invalid message"); nothing below has been stored yet.
         const capabilities = parseCapabilities(msg.context);
+        const resume = parseResumeCapability(msg.context);
         const selectedModel = context.settings?.model;
         if (selectedModel !== undefined && !isModelAllowed(selectedModel)) {
           // Reject rather than silently substituting another model; the
@@ -129,6 +138,9 @@ export function createMessageHandler({
         // Capabilities follow the latest accepted context, so a client that
         // resends context without `stream` is downgraded for later generations.
         streamManager.setClientCapabilities?.(capabilities);
+        // Session-level opt-ins (resume) are applied before any reply so the
+        // introductory suggestion is already sequenced.
+        onContextAccepted?.({ resume });
         // The accepted context supersedes any in-flight intro; session end and
         // socket close abort it through the stream manager's lifecycle.
         const intro = beginIntro(streamManager);
@@ -173,6 +185,7 @@ export function createMessageHandler({
       if (msg.end) {
         log.info(`🛑 Session [${sessionId}] ended.`);
         await streamManager.closeAll();
+        await onEnd?.();
         return;
       }
 
