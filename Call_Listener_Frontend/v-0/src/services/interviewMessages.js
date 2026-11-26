@@ -14,8 +14,15 @@ export function bytesToBase64(bytes) {
   return btoa(binary);
 }
 
+// Optional server features this client understands, advertised at the top
+// level of every context message. The server ignores names it doesn't know.
+export const CLIENT_CAPABILITIES = Object.freeze(["stream"]);
+
 export function encodeContextMessage(context) {
-  return JSON.stringify({ context });
+  const isObject = context && typeof context === "object" && !Array.isArray(context);
+  return JSON.stringify({
+    context: isObject ? { ...context, capabilities: [...CLIENT_CAPABILITIES] } : context,
+  });
 }
 
 export function encodeAudioMessage(source, buffer) {

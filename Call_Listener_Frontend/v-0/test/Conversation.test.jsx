@@ -56,7 +56,13 @@ it("composes capture, socket, and guidance state into the live workspace", async
   const ws = await renderConversation();
 
   expect(ws.sentMessages).toEqual([
-    { context: { version: 1, evidence: [{ requirement: "Redis", evidence: "Led a Redis migration" }] } },
+    {
+      context: {
+        version: 1,
+        evidence: [{ requirement: "Redis", evidence: "Led a Redis migration" }],
+        capabilities: ["stream"],
+      },
+    },
   ]);
   // Status derives from state: socket open + capture running is Listening,
   // whichever of the two events happened last.
