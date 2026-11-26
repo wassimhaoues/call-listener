@@ -15,6 +15,7 @@ const {
   Tray,
   Menu,
   nativeImage,
+  net,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 
@@ -51,6 +52,7 @@ const trayIco = getAssetPath("tray.ico");
 
 // ---- Services ---------------------------------------------------------------
 const { AuthManager } = require("./services/auth");
+const { classifyAuthFailure } = require("./services/authFailure");
 const { AudioRouteManager } = require("./services/audio");
 const { hardenSessionSecurity } = require("./services/security");
 const { makeTrayTemplate } = require("./services/tray");
@@ -291,7 +293,10 @@ async function createWindow(authMgr, audioMgr, capabilities) {
     await authMgr.ensure();
   } catch (e) {
     console.error("[auth] token fetch failed:", e);
-    await gotoRoute("/autherror"); // <<<< replaced
+    // Distinguish "no network" from "server unreachable / TLS / HTTP error"
+    // so the renderer does not blame the candidate's connection by default.
+    const reason = classifyAuthFailure(e, { online: net.isOnline() });
+    await gotoRoute(`/autherror?reason=${reason}`);
     return;
   }
 
