@@ -45,6 +45,11 @@ const COPY = {
     body: "The Call Listener service has disabled this installation, so it can no longer sign in. Contact support if you think this is a mistake.",
     tips: ["Retrying will not help until support re-enables this installation."],
   },
+  credential: {
+    title: "This installation could not be verified",
+    body: "The Call Listener service did not accept this installation's stored sign-in key. This can happen after copying the app's data from another computer. Contact support to reset this installation.",
+    tips: ["Retrying will not help until support resets this installation's sign-in key."],
+  },
 };
 
 export function authErrorCopy(reason) {

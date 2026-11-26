@@ -123,6 +123,17 @@ An operator deny-list that cuts off one installation (`device_id`, the desktop's
 - **Redis failures.** Lookups time out after 1 s. With `REVOCATION_FAIL_CLOSED=false` (the default) a failed lookup allows the request and logs a warning with the error code (fail-open: Redis already gates tickets, so availability wins and a revoked device can slip through only while Redis is down). With `true`, HTTP answers `503 { "error": "revocation_unavailable" }` and the socket closes with `1011 auth_unavailable` (fail-closed: no revoked device ever authenticates, but a Redis outage refuses new tokens for every installation).
 - **Restore.** Deleting the key restores access immediately; existing JWTs that have not expired work again.
 
+### Installation enrollment
+
+Binds each installation ID to a secret the desktop keeps in the OS credential store, so an installation ID alone (for example one seen in a log or support ticket) no longer yields a token. `services/auth/deviceEnrollment.js`:
+
+- **Storage.** `enrolled:<sha256(device_id) hex>` → `{ "secret_sha256", "enrolled_at" }`, no expiry. Neither the raw ID nor the secret is stored.
+- **Enrollment.** `POST /auth/token` accepts an optional `device_secret` (43–128 base64url characters; the desktop sends 32 random bytes). The first well-formed secret for an unenrolled ID enrolls it (trust on first use, `SET NX`, so concurrent first uses cannot both win). From then on the same secret is required; a wrong, malformed, or missing secret answers `401 device_secret_invalid` with no cookie. The check runs after the revocation check.
+- **Older clients.** A request without `device_secret` for an unenrolled ID is accepted while `ENROLLMENT_REQUIRED=false` (default), so existing desktop builds keep working. With `ENROLLMENT_REQUIRED=true` it answers `403 enrollment_required`.
+- **Redis failures.** Lookups time out after 1 s. Whenever a secret is involved, or enrollment is required, a failure answers `503 enrollment_unavailable` (fail-closed: accepting would let anyone holding the ID in). A legacy request with nothing to verify is still allowed while enrollment is optional.
+- **Logs.** An installation is named only by its 12-character fingerprint; secrets are never logged.
+- **Limits.** Trust on first use cannot tell the first sign-in of a stolen ID apart from the real installation's; it protects enrolled installations. Deleting the desktop's data still creates a new, unenrolled installation (see revocation above). `npm run admin:revocation -- reset-enrollment <device-id>` forgets an enrollment so that installation enrolls again on its next sign-in.
+
 ## Integrations and data
 
 `DeepgramService` uses the `nova-3` live model with `linear16`, 48 kHz mono audio, French language, interim results (forwarded only to `interim`-capable clients, see above), VAD, and utterance boundaries (`endpointing: 400`, `utterance_end_ms: 1200`). Audio sent before the Deepgram socket opens is queued by the SDK and sent on open. On an explicit `{ end }` (plain or with the debrief), `closeAll({ flushFinal: true })` sends Deepgram `Finalize` on each stream, waits up to `FINALIZE_WAIT_MS` (1,500 ms) for its answer, and records the finalized text that had no `UtteranceEnd` yet as a last transcript line (history and client, no generation), so the debrief includes the answer given right before Stop. A socket close or disconnect stops streams without that wait. `StreamManager` limits generated replies to one at a time and uses an 800 ms cooldown and a 12-second model timeout.

@@ -41,6 +41,13 @@ export function createMemoryRedis({ now = () => Date.now() } = {}) {
       return value;
     },
     async set(key, value, mode, seconds) {
+      // `SET key value NX`: only when the key does not exist (null otherwise).
+      if (mode === "NX") {
+        dropIfExpired(key);
+        if (strings.has(key)) return null;
+        strings.set(key, String(value));
+        return "OK";
+      }
       strings.set(key, String(value));
       deadlines.delete(key);
       if (mode === "EX") {
