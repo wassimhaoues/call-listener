@@ -21,23 +21,12 @@ export function fallbackEvidence(evidence) {
     .map(({ requirement, evidence: text }) => ({ requirement, evidence: text }));
 }
 
-/**
- * Select up to three supplied evidence references relevant to the latest turn.
- * When none matches, fall back to the first three approved references so the
- * prompt never carries the whole (up to 30 item) evidence list.
- */
-export function selectRelevantEvidence(contextString, historyString) {
-  let rawContext;
-  try {
-    rawContext = JSON.parse(contextString || "{}");
-  } catch {
-    return [];
-  }
-  if (!isCandidateInterviewContext(rawContext)) return [];
-  const context = parseInterviewContext(rawContext);
-  const latestTurn = String(historyString || "").split("\n").at(-1) || "";
-  const queryTokens = tokens(latestTurn);
-  const relevant = (context.evidence || [])
+/** How many earlier history lines a follow-up question may inherit its topic from. */
+export const FOLLOW_UP_LOOKBACK_LINES = 6;
+
+function rankEvidence(evidence, queryText) {
+  const queryTokens = tokens(queryText);
+  return (evidence || [])
     .map((item) => {
       const evidenceTokens = tokens(`${item.requirement} ${item.evidence}`);
       return {
@@ -49,5 +38,33 @@ export function selectRelevantEvidence(contextString, historyString) {
     .sort((left, right) => right.score - left.score)
     .slice(0, MAX_PROMPT_EVIDENCE)
     .map(({ requirement, evidence }) => ({ requirement, evidence }));
-  return relevant.length ? relevant : fallbackEvidence(context.evidence);
+}
+
+/**
+ * Select up to three supplied evidence references relevant to the latest turn.
+ * A short follow-up ("What did you change afterwards?") rarely repeats its
+ * topic, so when the latest turn matches nothing the preceding exchange is
+ * used: earlier interviewer questions and the candidate's spoken answers, but
+ * never assistant suggestions (they may mention any evidence). When nothing
+ * matches at all, fall back to the first three approved references so the
+ * prompt never carries the whole (up to 30 item) evidence list.
+ */
+export function selectRelevantEvidence(contextString, historyString) {
+  let rawContext;
+  try {
+    rawContext = JSON.parse(contextString || "{}");
+  } catch {
+    return [];
+  }
+  if (!isCandidateInterviewContext(rawContext)) return [];
+  const context = parseInterviewContext(rawContext);
+  const lines = String(historyString || "").split("\n").filter((line) => line.trim());
+  const latest = rankEvidence(context.evidence, lines.at(-1) || "");
+  if (latest.length) return latest;
+  const precedingExchange = lines
+    .slice(-FOLLOW_UP_LOOKBACK_LINES, -1)
+    .filter((line) => !line.startsWith("assistant:"))
+    .join("\n");
+  const inherited = rankEvidence(context.evidence, precedingExchange);
+  return inherited.length ? inherited : fallbackEvidence(context.evidence);
 }
