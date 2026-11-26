@@ -2,15 +2,29 @@
 const path = require("path");
 const os = require("os");
 const fs = require("fs");
-const { execFile, exec, spawn } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const { parseCsvLine } = require("../utils/csv.js");
+
+// Absolute path so the installer launch never depends on PATH lookup.
+const POWERSHELL_PATH = path.join(
+  process.env.SystemRoot || "C:\\Windows",
+  "System32",
+  "WindowsPowerShell",
+  "v1.0",
+  "powershell.exe"
+);
+const {
+  assertDeviceId,
+  assertExecutablePath,
+  isSafeDeviceId,
+} = require("./audioCommandGuards.js");
 
 class AudioRouteManager {
   /**
    * @param {{ svvPath:string, vbCableInstaller:string, userDataDir:string, logger:Console }} cfg
    */
   constructor(cfg) {
-    this.svv = cfg.svvPath;
+    this.svv = assertExecutablePath(cfg.svvPath, "SoundVolumeView.exe");
     this.vbCableInstaller = cfg.vbCableInstaller;
     this.userDataDir = cfg.userDataDir;
     this.log = cfg.logger || console;
@@ -47,7 +61,7 @@ class AudioRouteManager {
 
   async detectVBCable() {
     const stdout = await new Promise((resolve, reject) => {
-      exec(`"${this.svv}" /scomma`, { windowsHide: true }, (err, out) => {
+      execFile(this.svv, ["/scomma"], { windowsHide: true }, (err, out) => {
         if (err) return reject(err);
         resolve(out);
       });
@@ -114,7 +128,7 @@ class AudioRouteManager {
     if (!cmdId) throw new Error("Failed to extract Command-Line Friendly ID");
 
     this.log.log(`[audio] default playback: ${name} (${cmdId})`);
-    return cmdId;
+    return assertDeviceId(cmdId);
   }
 
   // --- Public control ---------------------------------------------------------
@@ -167,6 +181,7 @@ class AudioRouteManager {
   }
 
   async setDefault(deviceNameOrCmdId) {
+    assertDeviceId(deviceNameOrCmdId);
     await new Promise((resolve, reject) => {
       execFile(
         this.svv,
@@ -196,6 +211,25 @@ class AudioRouteManager {
 
   async recoverIfDirty() {
     const s = this._readState();
+    if (s?.pendingRestore && s.defaultDevice && !isSafeDeviceId(s.defaultDevice)) {
+      // The state file lives on disk; never pass an unexpected value to SVV.
+      this.log.warn("[audio] ignoring invalid saved default device");
+      s.defaultDevice = null;
+    }
+    if (s?.pendingRestore && !s.defaultDevice) {
+      await new Promise((resolve) => {
+        execFile(
+          this.svv,
+          ["/SetListenToThisDevice", "VB-Audio Virtual Cable", "0"],
+          { windowsHide: true },
+          () => {
+            this._rmState();
+            resolve();
+          }
+        );
+      });
+      return;
+    }
     if (s?.pendingRestore && s.defaultDevice) {
       this.log.log("[audio] recovering from previous crash...");
       await new Promise((resolve) => {
@@ -251,12 +285,26 @@ class AudioRouteManager {
     });
     if (ret.response !== 0) return false;
 
-    const ps = `Start-Process -FilePath '${this.vbCableInstaller.replace(
-      /'/g,
-      "''"
-    )}' -Verb runAs`;
-    exec(
-      `powershell -NoProfile -Command "${ps}"`,
+    let installer;
+    try {
+      installer = assertExecutablePath(
+        this.vbCableInstaller,
+        "VBCABLE_Setup_x64.exe"
+      );
+    } catch (err) {
+      dialog.showErrorBox("Installer failed to launch", String(err));
+      return false;
+    }
+    // PowerShell single-quoted literal: only ' needs escaping (as '').
+    const quoted = installer.replaceAll("'", "''");
+    execFile(
+      POWERSHELL_PATH,
+      [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `Start-Process -FilePath '${quoted}' -Verb runAs`,
+      ],
       { windowsHide: true },
       (err) => {
         if (err) dialog.showErrorBox("Installer failed to launch", String(err));
@@ -283,7 +331,12 @@ class AudioRouteManager {
 
     // Prefer using the embedded Node runtime Electron ships with:
     const nodeExe = process.execPath; // Electron exe; runs JavaScript too
-    const args = [watchdogPath, process.pid, defaultDevice, this.svv];
+    const args = [
+      watchdogPath,
+      String(process.pid),
+      assertDeviceId(defaultDevice),
+      this.svv,
+    ];
 
     try {
       const child = spawn(nodeExe, args, {
