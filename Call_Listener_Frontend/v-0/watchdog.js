@@ -3,9 +3,27 @@ const fs = require("fs");
 const path = require("path");
 const { execFile } = require("child_process");
 
-const mainPid = parseInt(process.argv[2], 10);
-const defaultDevice = process.argv[3];
+const mainPid = Number.parseInt(process.argv[2], 10);
 const svv = process.argv[4];
+// Kept self-contained: this file runs unpacked, outside app.asar.
+function isSafeArg(value) {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 256 &&
+    !/^[/-]/.test(value) &&
+    !/["\u0000-\u001f]/.test(value)
+  );
+}
+const defaultDevice = isSafeArg(process.argv[3]) ? process.argv[3] : null;
+if (
+  !Number.isInteger(mainPid) ||
+  typeof svv !== "string" ||
+  !path.isAbsolute(svv) ||
+  path.basename(svv).toLowerCase() !== "soundvolumeview.exe"
+) {
+  process.exit(1);
+}
 
 // Log to userData\watchdog.log if available
 let logPath = "watchdog.log";
