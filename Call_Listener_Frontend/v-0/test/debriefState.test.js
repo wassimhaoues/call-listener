@@ -113,3 +113,24 @@ describe("review normalization", () => {
     expect(describeDebriefReason("toString")).toBe(DEFAULT_DEBRIEF_REASON_TEXT);
   });
 });
+
+describe("self-review notes", () => {
+  it("are editable once a result arrives, bounded, kept across the result, and cleared on discard", async () => {
+    const {
+      debriefDiscarded,
+      debriefReceived,
+      debriefReducer,
+      debriefRequested,
+      initialDebriefState,
+      MAX_SELF_REVIEW_NOTES_CHARS,
+      selfReviewNotesEdited,
+    } = await import("../src/services/debriefState.js");
+    const preparing = debriefReducer(initialDebriefState, debriefRequested());
+    expect(debriefReducer(preparing, selfReviewNotesEdited("early"))).toBe(preparing);
+    const skipped = debriefReducer(preparing, debriefReceived({ status: "skipped", reason: "budget_reached" }));
+    const noted = debriefReducer(skipped, selfReviewNotesEdited("x".repeat(MAX_SELF_REVIEW_NOTES_CHARS + 10)));
+    expect(noted.selfReviewNotes).toHaveLength(MAX_SELF_REVIEW_NOTES_CHARS);
+    expect(debriefReducer(noted, debriefDiscarded()).selfReviewNotes).toBe("");
+    expect(debriefReducer(initialDebriefState, selfReviewNotesEdited("idle"))).toBe(initialDebriefState);
+  });
+});

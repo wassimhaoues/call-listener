@@ -72,9 +72,22 @@ function section(title, lines, emptyText) {
  * same text. All review text is escaped as literal Markdown; nothing is
  * converted to HTML.
  *
- * @param {{ review: object, followUpDraft?: string, evidence?: Array<{ requirement: string }>, date?: Date }} input
+ * @param {{ review: object | null, followUpDraft?: string, selfReviewNotes?: string, evidence?: Array<{ requirement: string }>, date?: Date }} input
+ *   Without a `review` (the AI review failed or was skipped) only the
+ *   candidate's own notes are exported.
  */
-export function buildDebriefMarkdown({ review, followUpDraft, evidence = [], date = new Date() }) {
+export function buildDebriefMarkdown({ review, followUpDraft, selfReviewNotes = "", evidence = [], date = new Date() }) {
+  const notes = String(selfReviewNotes ?? "");
+  const notesSection = ["## Your notes", "", notes.trim() ? fencedText(notes) : "No notes.", ""];
+  if (!review) {
+    return [
+      "# Interview review",
+      "",
+      "Exported " + formatReviewDate(date) + ". No AI review was available for this interview. Call Listener did not save these notes.",
+      "",
+      ...notesSection,
+    ].join("\n");
+  }
   const questions = (review?.questionsCovered || []).flatMap((item, index) => questionLines(item, index, evidence));
   const strengths = (review?.strengths || []).map((item) => "- " + escapeMarkdownText(item));
   const topics = (review?.improvementTopics || []).flatMap(topicLines);
@@ -88,6 +101,7 @@ export function buildDebriefMarkdown({ review, followUpDraft, evidence = [], dat
     ...section("Questions covered", questions, "No questions were identified."),
     ...section("Strengths", strengths, "None noted."),
     ...section("Topics to improve", topics, "None noted."),
+    ...notesSection,
     "## Follow-up draft",
     "",
     draft.trim() ? fencedText(draft) : "No draft.",

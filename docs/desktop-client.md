@@ -49,7 +49,9 @@ The top bar has **Pause**, **Stop and review**, and **Stop** (ordinary buttons, 
 - the review: questions covered (with what the candidate said and the evidence used, named by requirement), strengths, topics to improve, and an editable follow-up draft (a textarea; it is never sent anywhere), or
 - a plain-text explanation when the review was skipped (budget spent, nothing transcribed) or failed (including no answer within 45 s or a closed connection).
 
-Everything is rendered as text nodes, never HTML. `debriefState.js` is the pure reducer (`idle` → `preparing` → `ready`/`failed`/`skipped`; edits to the draft; discard) and bounds what the server sent.
+In every result state the candidate can also write **Your notes**, a self-review textarea (at most 8,000 characters, held only in memory). The notes are exported with the review, or on their own (with "No AI review was available") when the review was skipped or failed; Export appears then once notes are non-empty.
+
+Everything is rendered as text nodes, never HTML. `debriefState.js` is the pure reducer (`idle` → `preparing` → `ready`/`failed`/`skipped`; edits to the draft and the self-review notes; discard) and bounds what the server sent.
 
 **Export as Markdown** builds the file in the renderer with the pure `buildDebriefMarkdown()` (all review text backslash-escaped so it stays literal Markdown; the draft goes in a fenced block) and saves it through a `Blob` and a temporary `<a download>` link, so Electron shows its save dialog. No IPC is involved. **Discard** (or **Cancel** while preparing, **Back to setup** after a failure) forgets the review and returns to setup.
 

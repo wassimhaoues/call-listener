@@ -32,6 +32,22 @@ function readBlob(blob) {
   });
 }
 
+// jsdom has no object URLs: install doubles (and a no-op anchor click) for
+// one test; returns the createObjectURL mock.
+function installDownloadDoubles() {
+  const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
+  const createObjectURL = vi.fn(() => "blob:review");
+  URL.createObjectURL = createObjectURL;
+  URL.revokeObjectURL = vi.fn();
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  onTestFinished(() => {
+    URL.createObjectURL = original.create;
+    URL.revokeObjectURL = original.revoke;
+    click.mockRestore();
+  });
+  return { createObjectURL, click };
+}
+
 function Actions() {
   return <div data-testid="actions">{useUI().actions}</div>;
 }
@@ -134,16 +150,7 @@ describe("Stop and review", () => {
   });
 
   it("exports the edited review as a Markdown download without storing it", async () => {
-    // jsdom has no object URLs; install doubles for this test only.
-    const original = { create: URL.createObjectURL, revoke: URL.revokeObjectURL };
-    const createObjectURL = vi.fn(() => "blob:review");
-    URL.createObjectURL = createObjectURL;
-    URL.revokeObjectURL = vi.fn();
-    onTestFinished(() => {
-      URL.createObjectURL = original.create;
-      URL.revokeObjectURL = original.revoke;
-    });
-    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const { createObjectURL, click } = installDownloadDoubles();
     const ws = await stopAndReview();
     await act(async () => ws.serverSend({ debrief: { status: "ready", review: REVIEW } }));
     fireEvent.change(screen.getByLabelText("Follow-up draft"), { target: { value: "Edited draft." } });
@@ -160,7 +167,22 @@ describe("Stop and review", () => {
     expect(markdown).toContain("\\<b\\>billing\\</b\\>");
     expect({ ...localStorage }).toEqual(storedBefore);
     expect(screen.getByText(/Export started/)).toBeInTheDocument();
-    click.mockRestore();
+  });
+
+  it("lets the candidate write and export self-review notes when the AI review was skipped", async () => {
+    const { createObjectURL } = installDownloadDoubles();
+    const ws = await stopAndReview();
+    await act(async () => ws.serverSend({ debrief: { status: "skipped", reason: "budget_reached" } }));
+    expect(screen.queryByRole("button", { name: "Export as Markdown" })).toBeNull();
+    const storedBefore = { ...localStorage };
+
+    fireEvent.change(screen.getByLabelText("Your notes"), { target: { value: "Slow start on the Redis question." } });
+    fireEvent.click(screen.getByRole("button", { name: "Export as Markdown" }));
+
+    const markdown = await readBlob(createObjectURL.mock.calls[0][0]);
+    expect(markdown).toContain("~~~text\nSlow start on the Redis question.\n~~~");
+    expect(markdown).toContain("No AI review was available");
+    expect({ ...localStorage }).toEqual(storedBefore);
   });
 
   it("discard forgets the review and returns to setup", async () => {
