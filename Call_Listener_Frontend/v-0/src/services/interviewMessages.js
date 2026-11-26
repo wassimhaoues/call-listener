@@ -16,7 +16,9 @@ export function bytesToBase64(bytes) {
 
 // Optional server features this client understands, advertised at the top
 // level of every context message. The server ignores names it doesn't know.
-export const CLIENT_CAPABILITIES = Object.freeze(["stream"]);
+// `resume` opts into resumable sessions: sequenced server messages, a session
+// ID, and `{ resume }` after an unexpected disconnect.
+export const CLIENT_CAPABILITIES = Object.freeze(["stream", "resume"]);
 
 export function encodeContextMessage(context) {
   const isObject = context && typeof context === "object" && !Array.isArray(context);
@@ -31,6 +33,11 @@ export function encodeAudioMessage(source, buffer) {
 
 export function encodeInterviewerQuestionMessage(question) {
   return JSON.stringify({ interviewer_question: question });
+}
+
+// Must be the first frame on a reconnected socket.
+export function encodeResumeMessage(sessionId, lastSeq) {
+  return JSON.stringify({ resume: { sessionId, lastSeq } });
 }
 
 export function encodeEndMessage() {

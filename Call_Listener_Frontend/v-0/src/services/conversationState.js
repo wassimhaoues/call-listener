@@ -22,6 +22,10 @@ export const STATUS = {
   MODEL_UNAVAILABLE: "Selected model unavailable",
   SLOW_CONNECTION: "Slow connection — limiting audio",
   CAPTURE_FAILED: "Audio capture unavailable",
+  RECONNECTING: "Reconnecting…",
+  CONNECTION_LOST: "Connection lost",
+  AUDIO_GAP: "Reconnected — audio during the interruption was not transcribed",
+  SESSION_RESTARTED: "Reconnected — new session started",
 };
 
 export const CONNECTION = {
@@ -30,6 +34,10 @@ export const CONNECTION = {
   CLOSED: "closed",
   ERROR: "error",
   FAILED: "failed",
+  // Resumable sessions only: the socket dropped and the client is retrying.
+  RECONNECTING: "reconnecting",
+  // Reconnection gave up after the resume window; only a manual restart helps.
+  LOST: "lost",
 };
 
 const GENERATION = {
@@ -46,6 +54,8 @@ export const BUDGET_REACHED_TEXT =
   "Interview model budget reached. Suggestions are paused.";
 export const UNSUPPORTED_MODEL_TEXT =
   "The AI model chosen in Interview Settings isn't available. Stop the session, pick another model in Interview Settings, and start again.";
+export const CONNECTION_LOST_TEXT =
+  "The connection to the server was lost and could not be restored. Start a new session to continue; guidance will not include the earlier conversation.";
 
 // Bound the rendered transcript so a long interview cannot grow the DOM and
 // state without limit. The newest entries are kept.
@@ -101,6 +111,10 @@ export function deriveStatus(state) {
       return STATUS.DISCONNECTED;
     case CONNECTION.CONNECTING:
       return STATUS.CONNECTING;
+    case CONNECTION.RECONNECTING:
+      return STATUS.RECONNECTING;
+    case CONNECTION.LOST:
+      return STATUS.CONNECTION_LOST;
     default:
       break;
   }
@@ -138,6 +152,10 @@ const baseState = {
   isStreaming: false,
   isPaused: false,
   droppedAudioChunks: 0,
+  // Resumable sessions: the server session ID and the highest `seq` applied,
+  // so messages replayed after a reconnect are applied exactly once.
+  sessionId: null,
+  lastSeq: 0,
 };
 
 export const initialConversationState = Object.freeze({
@@ -309,25 +327,79 @@ function applyServerError(state, message) {
   return state;
 }
 
+const IDLE_GENERATION = {
+  isThinking: false,
+  isStreaming: false,
+  generationId: null,
+  generation: GENERATION.IDLE,
+};
+
+function isGenerationInProgress(state) {
+  return state.generation === GENERATION.THINKING || state.generation === GENERATION.STREAMING;
+}
+
+// `{ session: { id } }` names the server session (resume-capable servers).
+// A different ID means the old session expired and a new one started: its
+// sequence restarts, and any generation the old session had in flight will
+// never complete.
+function applySession(state, message) {
+  const id = message.session?.id;
+  if (typeof id !== "string" || !id || id === state.sessionId) return state;
+  const restarted = state.sessionId !== null && isGenerationInProgress(state);
+  return {
+    ...state,
+    ...(restarted ? IDLE_GENERATION : {}),
+    sessionId: id,
+    lastSeq: 0,
+  };
+}
+
+function applyNotice(state, message) {
+  if (message.notice !== "audio_gap") return state;
+  return { ...state, notice: STATUS.AUDIO_GAP };
+}
+
 const SERVER_MESSAGE_HANDLERS = [
+  applySession,
   applyTranscript,
   applyGenerationResult,
   applyGenerationThinking,
   applyGenerationDelta,
   applyServerError,
+  applyNotice,
 ];
+
+// Sequenced messages (resume-capable sessions) at or below the last applied
+// `seq` are replays this client already has; they are ignored.
+function applySequence(state, message) {
+  if (!Number.isSafeInteger(message.seq)) return state;
+  if (message.seq <= state.lastSeq) return null;
+  return { ...state, lastSeq: message.seq };
+}
 
 export function applyServerMessage(state, message) {
   if (!message || typeof message !== "object") return state;
+  const sequenced = applySequence(state, message);
+  if (sequenced === null) return state;
   return SERVER_MESSAGE_HANDLERS.reduce(
     (current, handler) => handler(current, message),
-    state
+    sequenced
   );
 }
 
 function reduceFacts(state, action) {
   switch (action?.type) {
     case ACTION.CONNECTION_CHANGED:
+      // Once reconnection gives up, an in-flight generation can never finish.
+      if (action.connection === CONNECTION.LOST && isGenerationInProgress(state)) {
+        return {
+          ...state,
+          ...IDLE_GENERATION,
+          suggestion: "",
+          connection: action.connection,
+          notice: null,
+        };
+      }
       return { ...state, connection: action.connection, notice: null };
     case ACTION.CAPTURE_STARTED:
       return { ...state, isCapturing: true, notice: null };

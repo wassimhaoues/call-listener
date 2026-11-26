@@ -26,7 +26,9 @@ launch_and_check() {
   colors="$(identify -format '%k' "$OUT/$label.png" 2>/dev/null || echo 0)"
   echo "$label screenshot unique colors: $colors"
   if [[ "$colors" -lt 16 ]]; then
-    echo "::warning title=$label window looks blank::Screenshot has $colors colors after ${RUN_SECONDS}s; the renderer may not have loaded."
+    echo "::error title=$label window looks blank::Screenshot has $colors colors after ${RUN_SECONDS}s; the renderer did not load."
+    kill -- "-$pid" 2>/dev/null || true
+    return 1
   fi
   if ! kill -0 "$pid" 2>/dev/null; then
     echo "$label exited early"; cat "$OUT/$label-stdout.log" "$OUT/$label-stderr.log"

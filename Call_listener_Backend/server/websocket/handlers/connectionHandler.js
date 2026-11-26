@@ -12,6 +12,8 @@ import { parseInterviewContext } from "../../contracts/interviewContext.js";
 import { createInterviewWorkflow } from "../../services/interview/interviewWorkflow.js";
 import { createInterviewBudget } from "../../services/ai/interviewBudget.js";
 import { loggers } from "../../core/logger/index.js";
+import { createSessionManager } from "../../services/session/sessionManager.js";
+import { createConnectionHandler } from "./connectionLifecycle.js";
 
 const log = loggers.websocket;
 const ChatHistory = createChatHistory({ redisClient: redis });
@@ -48,9 +50,8 @@ const handleMessage = createMessageHandler({
     CONFIG.OPENROUTER_ALLOWED_MODELS.includes(modelId),
 });
 
-export function handleConnection(wsClient, req, wss) {
-  const sessionId = Date.now().toString(36);
-  const streamManager = new StreamManager(sessionId, {
+const sessions = createSessionManager({
+  createStreamManager: (sessionId) => new StreamManager(sessionId, {
     createTranscriptionStream: (label, language) => new DeepgramService(label, {
       deepgramClient: deepgram,
       language,
@@ -64,20 +65,16 @@ export function handleConnection(wsClient, req, wss) {
       return result.suggestion;
     },
     Budget,
-  });
-  log.info(`🎧 New WebSocket client connected [${sessionId}]`);
-  wsClient.on("message", async (data) => {
-    await handleMessage({ wsClient, sessionId, data, streamManager });
-  });
-  wsClient.on("close", async () => {
-    log.info(`❌ Client disconnected [${sessionId}]`);
-    await streamManager.closeAll();
+  }),
+  // Same Redis keys and purge as before: chat:<id>, context:<id>, budget.
+  purgeSession: async (sessionId) => {
     await ChatHistory.clear(sessionId);
     await ContextStore.clear(sessionId);
     await Budget?.clear(sessionId);
-  });
+  },
+  resumeWindowMs: CONFIG.RESUME_WINDOW_MS,
+  maxDisconnectedPerOwner: CONFIG.MAX_DISCONNECTED_SESSIONS_PER_OWNER,
+  log,
+});
 
-  wsClient.on("error", (err) => {
-    log.error(`⚠️ WebSocket error [${sessionId}]: %o`, err);
-  });
-}
+export const handleConnection = createConnectionHandler({ sessions, handleMessage, log });
