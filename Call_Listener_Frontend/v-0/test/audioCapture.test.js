@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  CaptureError,
   dbToPct,
+  describeCaptureError,
   floatToPcm16,
   getDeviceSelectionError,
   microphoneConstraints,
@@ -96,5 +98,33 @@ describe("interview message encoders", () => {
   it("encodes buffers larger than one String.fromCharCode batch", () => {
     const bytes = new Uint8Array(0x8000 * 2 + 7).map((_, i) => i % 256);
     expect(bytesToBase64(bytes)).toBe(Buffer.from(bytes).toString("base64"));
+  });
+});
+
+describe("describeCaptureError", () => {
+  const domError = (name) => Object.assign(new Error("x"), { name });
+
+  it("explains a denied microphone permission", () => {
+    const message = describeCaptureError(new CaptureError("mic", domError("NotAllowedError")));
+    expect(message).toMatch(/Microphone access was denied/);
+    expect(describeCaptureError(new CaptureError("mic", domError("SecurityError")))).toBe(message);
+  });
+
+  it("names the missing device", () => {
+    expect(describeCaptureError(new CaptureError("mic", domError("NotFoundError")))).toMatch(
+      /selected microphone was not found/
+    );
+    expect(
+      describeCaptureError(new CaptureError("system", domError("OverconstrainedError")))
+    ).toMatch(/selected interviewer \(system\) audio device was not found/);
+  });
+
+  it("reports a busy device and falls back to a generic message", () => {
+    expect(describeCaptureError(new CaptureError("mic", domError("NotReadableError")))).toMatch(
+      /in use by another application/
+    );
+    const generic = describeCaptureError(new CaptureError("system", domError("AbortError")));
+    expect(generic).toMatch(/Could not start interviewer \(system\) audio capture \(AbortError\)/);
+    expect(describeCaptureError(undefined)).toMatch(/Could not start microphone capture/);
   });
 });

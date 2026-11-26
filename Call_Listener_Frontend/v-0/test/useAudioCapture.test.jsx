@@ -14,10 +14,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function setup() {
+function setup(options = {}) {
   const onChunk = vi.fn();
   const hook = renderHook(() =>
-    useAudioCapture({ onChunk, workletUrl: "pcm-processor.js" })
+    useAudioCapture({ onChunk, workletUrl: "pcm-processor.js", ...options })
   );
   return { onChunk, ...hook };
 }
@@ -71,9 +71,15 @@ describe("useAudioCapture", () => {
     const [ctx] = audio.contexts;
     const [micNode, sysNode] = audio.workletNodes;
 
-    act(() => result.current.flush());
+    let flushed;
+    act(() => {
+      flushed = result.current.flush();
+    });
     expect(micNode.port.postMessage).toHaveBeenCalledWith({ type: "flush" });
     expect(sysNode.port.postMessage).toHaveBeenCalledWith({ type: "flush" });
+    act(() => micNode.port.onmessage({ data: { type: "flushed" } }));
+    act(() => sysNode.port.onmessage({ data: { type: "flushed" } }));
+    await act(() => flushed);
 
     act(() => result.current.stop());
     act(() => result.current.stop());
@@ -116,5 +122,115 @@ describe("useAudioCapture", () => {
 
     act(() => result.current.stop());
     expect(micProc.onaudioprocess).toBeNull();
+  });
+
+  it("flush resolves once every worklet delivered its final batch", async () => {
+    const { result, onChunk } = setup();
+    await act(() => result.current.start(DEVICES));
+    const [micNode, sysNode] = audio.workletNodes;
+    const buffer = new Int16Array([7]).buffer;
+
+    let done = false;
+    let flushed;
+    act(() => {
+      flushed = result.current.flush().then(() => (done = true));
+    });
+    act(() => micNode.port.onmessage({ data: { type: "chunk", source: "mic", buffer } }));
+    act(() => micNode.port.onmessage({ data: { type: "flushed" } }));
+    await act(async () => {});
+    expect(done).toBe(false); // still waiting for the system worklet
+
+    act(() => sysNode.port.onmessage({ data: { type: "flushed" } }));
+    await act(() => flushed);
+    expect(done).toBe(true);
+    expect(onChunk).toHaveBeenCalledWith("mic", buffer);
+  });
+
+  it("bounds the flush wait when a worklet never answers", async () => {
+    const { result } = setup({ flushTimeoutMs: 20 });
+    await act(() => result.current.start(DEVICES));
+    const started = Date.now();
+    await act(() => result.current.flush());
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it("flush resolves immediately when nothing is capturing", async () => {
+    const { result } = setup();
+    await act(() => result.current.flush());
+  });
+
+  it("releases a stream that arrives after stop", async () => {
+    let resolveMic;
+    audio.getUserMedia.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveMic = resolve))
+    );
+    const { result } = setup();
+    let pending;
+    act(() => {
+      pending = result.current.start({ micId: "mic-1", systemAudioEnabled: false });
+    });
+    act(() => result.current.stop());
+
+    const lateStream = { tracks: [{ stop: vi.fn() }] };
+    lateStream.getTracks = () => lateStream.tracks;
+    let started;
+    await act(async () => {
+      resolveMic(lateStream);
+      started = await pending;
+    });
+
+    expect(started).toBe(false);
+    expect(lateStream.tracks[0].stop).toHaveBeenCalledTimes(1);
+    expect(audio.contexts[0].close).toHaveBeenCalled();
+    expect(audio.workletNodes).toHaveLength(0);
+  });
+
+  it("releases capture when the hook unmounts during getUserMedia", async () => {
+    let resolveMic;
+    audio.getUserMedia.mockImplementationOnce(
+      () => new Promise((resolve) => (resolveMic = resolve))
+    );
+    const { result, unmount } = setup();
+    let pending;
+    act(() => {
+      pending = result.current.start({ micId: "mic-1", systemAudioEnabled: false });
+    });
+    unmount();
+    const lateStream = { tracks: [{ stop: vi.fn() }] };
+    lateStream.getTracks = () => lateStream.tracks;
+    await act(async () => {
+      resolveMic(lateStream);
+      await pending;
+    });
+    expect(lateStream.tracks[0].stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects with the failing source and releases what was acquired", async () => {
+    const denied = Object.assign(new Error("denied"), { name: "NotFoundError" });
+    audio.getUserMedia
+      .mockImplementationOnce(async () => {
+        const stream = { tracks: [{ stop: vi.fn() }] };
+        stream.getTracks = () => stream.tracks;
+        audio.streams.push(stream);
+        return stream;
+      })
+      .mockImplementationOnce(async () => {
+        throw denied;
+      });
+    const { result } = setup();
+
+    let error;
+    await act(async () => {
+      try {
+        await result.current.start(DEVICES);
+      } catch (err) {
+        error = err;
+      }
+    });
+
+    expect(error).toMatchObject({ name: "NotFoundError", source: "system" });
+    expect(error.cause).toBe(denied);
+    expect(audio.streams[0].tracks[0].stop).toHaveBeenCalledTimes(1);
+    expect(audio.contexts[0].close).toHaveBeenCalledTimes(1);
   });
 });

@@ -15,7 +15,10 @@ export default class TranscriptLog extends React.Component {
 
   getSnapshotBeforeUpdate(prevProps) {
     const scroller = this.scrollerRef.current;
-    if (!scroller || this.props.entries.length <= prevProps.entries.length) {
+    // Compare the newest entry, not the length: once the transcript reaches
+    // its cap, an append drops the oldest entry and the length stays equal.
+    const newestId = this.props.entries.at(-1)?.id;
+    if (!scroller || newestId === undefined || newestId === prevProps.entries.at(-1)?.id) {
       return false;
     }
     const distanceFromBottom =

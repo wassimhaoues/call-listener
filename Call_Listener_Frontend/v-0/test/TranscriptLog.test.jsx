@@ -54,3 +54,14 @@ it("follows new entries only when the reader is near the bottom", () => {
   rerender(<TranscriptLog entries={third} />);
   expect(scroller.scrollTo).not.toHaveBeenCalled();
 });
+
+it("keeps following new entries once the transcript is at its cap", () => {
+  vi.stubGlobal("requestAnimationFrame", (callback) => callback());
+  const first = [{ id: 1, role: "candidate", text: "One" }, { id: 2, role: "candidate", text: "Two" }];
+  const shifted = [first[1], { id: 3, role: "interviewer", text: "Three" }];
+
+  const { container, rerender } = render(<TranscriptLog entries={first} />);
+  const scroller = scrollerFor(container, { scrollHeight: 500, clientHeight: 200, scrollTop: 290 });
+  rerender(<TranscriptLog entries={shifted} />);
+  expect(scroller.scrollTo).toHaveBeenCalledWith({ top: 500, behavior: "smooth" });
+});

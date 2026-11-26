@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef } from "react";
 import { shouldSendAudio } from "@/services/audioBackpressure.js";
 import {
   audioChunkDropped,
+  CONNECTION,
+  connectionChanged,
   serverMessageReceived,
-  STATUS,
-  statusChanged,
 } from "@/services/conversationState.js";
 import {
   encodeAudioMessage,
@@ -34,24 +34,36 @@ export function useInterviewSocket({
   getWsUrl = defaultGetWsUrl,
 }) {
   const wsRef = useRef(null);
+  // Bumped by end()/unmount. A connect() whose URL resolves after that must
+  // not open a socket nobody will ever close.
+  const sessionRef = useRef(0);
   const optionsRef = useRef(null);
   optionsRef.current = { dispatch, isPaused, getContext, getWsUrl };
 
   const emit = useCallback((action) => optionsRef.current.dispatch(action), []);
 
   const connect = useCallback(async () => {
+    const session = sessionRef.current;
+    const ended = () => session !== sessionRef.current;
+    let wsUrl;
     try {
-      const wsUrl = await optionsRef.current.getWsUrl();
+      wsUrl = await optionsRef.current.getWsUrl();
+    } catch {
+      if (!ended()) emit(connectionChanged(CONNECTION.FAILED));
+      return;
+    }
+    if (ended()) return;
+    try {
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
       ws.binaryType = "arraybuffer";
       ws.onopen = () => {
-        emit(statusChanged(STATUS.CONNECTED));
+        emit(connectionChanged(CONNECTION.OPEN));
         const context = optionsRef.current.getContext();
         if (context !== undefined) ws.send(encodeContextMessage(context));
       };
-      ws.onclose = () => emit(statusChanged(STATUS.DISCONNECTED));
-      ws.onerror = () => emit(statusChanged(STATUS.CONNECTION_ERROR));
+      ws.onclose = () => emit(connectionChanged(CONNECTION.CLOSED));
+      ws.onerror = () => emit(connectionChanged(CONNECTION.ERROR));
       ws.onmessage = (event) => {
         let message;
         try {
@@ -62,7 +74,7 @@ export function useInterviewSocket({
         emit(serverMessageReceived(message));
       };
     } catch {
-      emit(statusChanged(STATUS.FAILED_TO_CONNECT));
+      emit(connectionChanged(CONNECTION.FAILED));
     }
   }, [emit]);
 
@@ -104,8 +116,10 @@ export function useInterviewSocket({
     return true;
   }, []);
 
-  // Sends `{ end: true }` and closes. Idempotent: later calls are no-ops.
+  // Sends `{ end: true }` and closes. Idempotent: later calls are no-ops, and
+  // a connect() still waiting for its URL will not open a socket.
   const end = useCallback(() => {
+    sessionRef.current += 1;
     const ws = wsRef.current;
     if (!ws) return;
     wsRef.current = null;

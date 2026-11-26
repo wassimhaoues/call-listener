@@ -4,9 +4,9 @@ import { useInterviewSocket } from "../src/hooks/useInterviewSocket.js";
 import { MAX_WEBSOCKET_BUFFERED_BYTES } from "../src/services/audioBackpressure.js";
 import {
   audioChunkDropped,
+  CONNECTION,
+  connectionChanged,
   serverMessageReceived,
-  STATUS,
-  statusChanged,
 } from "../src/services/conversationState.js";
 import { FakeWebSocket } from "./helpers/fakes.js";
 
@@ -53,7 +53,7 @@ describe("useInterviewSocket", () => {
     expect(getWsUrl).toHaveBeenCalledTimes(1);
     expect(ws.url).toBe("wss://example.test/ws");
     expect(ws.binaryType).toBe("arraybuffer");
-    expect(dispatch).toHaveBeenCalledWith(statusChanged(STATUS.CONNECTED));
+    expect(dispatch).toHaveBeenCalledWith(connectionChanged(CONNECTION.OPEN));
     expect(ws.sentMessages).toEqual([{ context: { version: 1 } }]);
   });
 
@@ -79,7 +79,7 @@ describe("useInterviewSocket", () => {
       }),
     });
     await act(() => result.current.connect());
-    expect(dispatch).toHaveBeenCalledWith(statusChanged(STATUS.FAILED_TO_CONNECT));
+    expect(dispatch).toHaveBeenCalledWith(connectionChanged(CONNECTION.FAILED));
     expect(FakeWebSocket.instances).toHaveLength(0);
   });
 
@@ -99,8 +99,8 @@ describe("useInterviewSocket", () => {
     const ws = await connectOpen(result);
     act(() => ws.onerror());
     act(() => ws.serverClose());
-    expect(dispatch).toHaveBeenCalledWith(statusChanged(STATUS.CONNECTION_ERROR));
-    expect(dispatch).toHaveBeenCalledWith(statusChanged(STATUS.DISCONNECTED));
+    expect(dispatch).toHaveBeenCalledWith(connectionChanged(CONNECTION.ERROR));
+    expect(dispatch).toHaveBeenCalledWith(connectionChanged(CONNECTION.CLOSED));
   });
 
   it("sends audio only while open, unpaused, and under the buffer limit", async () => {
@@ -174,5 +174,44 @@ describe("useInterviewSocket", () => {
     unmount();
     expect(ws.sentMessages).toEqual([{ end: true }]);
     expect(ws.closeCalls).toBe(1);
+  });
+
+  it("never opens a socket when unmounted before the URL resolves", async () => {
+    let resolveUrl;
+    const { result, unmount, dispatch } = setup({
+      getWsUrl: vi.fn(() => new Promise((resolve) => (resolveUrl = resolve))),
+    });
+    let pending;
+    act(() => {
+      pending = result.current.connect();
+    });
+    unmount();
+    await act(async () => {
+      resolveUrl("wss://example.test/ws");
+      await pending;
+    });
+
+    const leaked = FakeWebSocket.instances.filter((ws) => ws.closeCalls === 0);
+    expect(leaked).toEqual([]);
+    expect(dispatch).not.toHaveBeenCalledWith(connectionChanged(CONNECTION.FAILED));
+  });
+
+  it("never opens a socket when ended before the URL resolves", async () => {
+    let resolveUrl;
+    const { result } = setup({
+      getWsUrl: vi.fn(() => new Promise((resolve) => (resolveUrl = resolve))),
+    });
+    let pending;
+    act(() => {
+      pending = result.current.connect();
+    });
+    act(() => result.current.end());
+    await act(async () => {
+      resolveUrl("wss://example.test/ws");
+      await pending;
+    });
+
+    expect(FakeWebSocket.instances.filter((ws) => ws.closeCalls === 0)).toEqual([]);
+    expect(result.current.isOpen()).toBe(false);
   });
 });

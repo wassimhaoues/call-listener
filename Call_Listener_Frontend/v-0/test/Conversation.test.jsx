@@ -19,6 +19,7 @@ async function renderConversation() {
         <Actions />
         <Routes>
           <Route path="/" element={<p>Setup page</p>} />
+          <Route path="/autherror" element={<p>Auth error page</p>} />
           <Route path="/conversation" element={<Conversation />} />
         </Routes>
       </UIProvider>
@@ -57,8 +58,9 @@ it("composes capture, socket, and guidance state into the live workspace", async
   expect(ws.sentMessages).toEqual([
     { context: { version: 1, evidence: [{ requirement: "Redis", evidence: "Led a Redis migration" }] } },
   ]);
-  // Status shows the latest lifecycle event; here the socket opened last.
-  expect(screen.getByText("Connected")).toBeInTheDocument();
+  // Status derives from state: socket open + capture running is Listening,
+  // whichever of the two events happened last.
+  expect(screen.getByText("Listening")).toBeInTheDocument();
   expect(screen.getByText("Led a Redis migration")).toBeInTheDocument();
 
   act(() => ws.serverSend({ speaker: "you", transcript: "Hello there" }));
@@ -111,13 +113,99 @@ it("withholds audio while paused and resumes sending after resume", async () => 
   expect(audioCount()).toBe(2);
 });
 
-it("stop ends the socket, releases capture, and returns to setup", async () => {
+it("stop flushes the final audio batch, sends end, closes, and returns to setup", async () => {
   const ws = await renderConversation();
+  const [micNode] = audio.workletNodes;
   fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  fireEvent.click(screen.getByRole("button", { name: "Stop" })); // idempotent
 
-  expect(ws.sentMessages.at(-1)).toEqual({ end: true });
+  expect(micNode.port.postMessage).toHaveBeenCalledWith({ type: "flush" });
+  expect(ws.closeCalls).toBe(0); // still waiting for the final batch
+  const finalBatch = new Int16Array([3, 4]).buffer;
+  await act(async () => {
+    micNode.port.onmessage({ data: { type: "chunk", source: "mic", buffer: finalBatch } });
+    micNode.port.onmessage({ data: { type: "flushed" } });
+  });
+
+  const messages = ws.sentMessages;
+  expect(messages.at(-2)).toEqual({
+    source: "mic",
+    chunk: Buffer.from(finalBatch).toString("base64"),
+  });
+  expect(messages.at(-1)).toEqual({ end: true });
+  expect(messages.filter((m) => m.end)).toHaveLength(1);
   expect(ws.closeCalls).toBe(1);
   expect(audio.streams[0].tracks[0].stop).toHaveBeenCalled();
   expect(audio.contexts[0].close).toHaveBeenCalledTimes(1);
   expect(screen.getByText("Setup page")).toBeInTheDocument();
+});
+
+it("keeps the offline redirect instead of navigating home on unmount", async () => {
+  await renderConversation();
+  const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  act(() => window.dispatchEvent(new Event("offline")));
+  await act(async () => {});
+  expect(screen.getByText("Auth error page")).toBeInTheDocument();
+  expect(screen.queryByText("Setup page")).toBeNull();
+  onLine.mockRestore();
+});
+
+it("closes a socket whose URL resolves after the page unmounted", async () => {
+  let resolveUrl;
+  window.callApi.getWsUrl = vi.fn(() => new Promise((resolve) => (resolveUrl = resolve)));
+  render(
+    <MemoryRouter initialEntries={["/conversation"]}>
+      <UIProvider>
+        <Conversation />
+      </UIProvider>
+    </MemoryRouter>
+  );
+  await act(async () => {});
+  cleanup();
+  await act(async () => resolveUrl("wss://example.test/ws"));
+  expect(FakeWebSocket.instances.filter((ws) => ws.closeCalls === 0)).toEqual([]);
+});
+
+it.each([
+  ["NotAllowedError", /Microphone access was denied/],
+  ["NotFoundError", /selected microphone was not found/],
+  ["AbortError", /Could not start microphone capture/],
+])("explains a %s from getUserMedia and ends the session", async (name, message) => {
+  let rejectMic;
+  audio.getUserMedia.mockImplementationOnce(
+    () => new Promise((resolve, reject) => (rejectMic = reject))
+  );
+  const ws = await renderConversation();
+  expect(screen.getByText("Connected")).toBeInTheDocument();
+  await act(async () => rejectMic(Object.assign(new Error("gum failed"), { name })));
+
+  expect(screen.getByRole("alert")).toHaveTextContent(message);
+  expect(screen.getByText("Audio capture unavailable")).toBeInTheDocument();
+  expect(screen.queryByText("Listening")).toBeNull();
+  expect(ws.sentMessages.at(-1)).toEqual({ end: true });
+  expect(ws.closeCalls).toBe(1);
+  expect(audio.contexts[0].close).toHaveBeenCalled();
+});
+
+it("keeps Paused when guidance arrives while paused", async () => {
+  const ws = await renderConversation();
+  fireEvent.click(screen.getByRole("button", { name: "Pause" }));
+  act(() => ws.serverSend({ ai_reply: "Late guidance." }));
+  expect(screen.getByText("Paused")).toBeInTheDocument();
+  expect(screen.queryByText("Listening")).toBeNull();
+});
+
+it("shows the model that produced the current suggestion", async () => {
+  const ws = await renderConversation();
+  act(() =>
+    ws.serverSend({ ai_reply: "Answer.", model: { selected: "openai/gpt-4o-mini", actual: null } })
+  );
+  expect(screen.getByText("Model: openai/gpt-4o-mini")).toBeInTheDocument();
+});
+
+it("tells the candidate to pick another model when the choice is unsupported", async () => {
+  const ws = await renderConversation();
+  act(() => ws.serverSend({ error: "unsupported_model" }));
+  expect(screen.getByRole("alert")).toHaveTextContent(/isn.t available/);
+  expect(screen.getByRole("alert")).toHaveTextContent(/Interview Settings/);
 });
