@@ -65,13 +65,15 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y xvfb imagemagick libfuse2t64 desktop-file-utils
-      - run: npm ci
+      # Lifecycle scripts are not needed: electron-builder downloads its own
+      # pinned Electron distribution for packaging.
+      - run: npm ci --ignore-scripts
       - name: Build Linux packages
         env:
           NODE_ENV: production
         run: |
-          npm exec vite build
-          npm exec electron-builder -- --linux deb AppImage --x64 --publish never
+          ./node_modules/.bin/vite build
+          ./node_modules/.bin/electron-builder --linux deb AppImage --x64 --publish never
       - name: Smoke test packages under Xvfb
         run: |
           Xvfb :99 -screen 0 1280x800x24 &

@@ -25,7 +25,7 @@ launch_and_check() {
   local colors
   colors="$(identify -format '%k' "$OUT/$label.png" 2>/dev/null || echo 0)"
   echo "$label screenshot unique colors: $colors"
-  if [ "$colors" -lt 16 ]; then
+  if [[ "$colors" -lt 16 ]]; then
     echo "::warning title=$label window looks blank::Screenshot has $colors colors after ${RUN_SECONDS}s; the renderer may not have loaded."
   fi
   if ! kill -0 "$pid" 2>/dev/null; then
@@ -47,16 +47,16 @@ DESKTOP="$(dpkg -L "$PKG" | grep -E '\.desktop$' || true)"
 DESKTOP="${DESKTOP%%$'\n'*}"
 echo "Binary: $BIN"; echo "Desktop entry: $DESKTOP"
 du -sh "$(dirname "$BIN")" | tee "$OUT/install-size.txt"
-[ -n "$BIN" ] || { echo "installed binary not found"; exit 1; }
-[ -n "$DESKTOP" ] && desktop-file-validate "$DESKTOP" | tee "$OUT/desktop-validate.txt" || true
+[[ -n "$BIN" ]] || { echo "installed binary not found"; exit 1; }
+[[ -n "$DESKTOP" ]] && desktop-file-validate "$DESKTOP" | tee "$OUT/desktop-validate.txt" || true
 SANDBOX="$(dirname "$BIN")/chrome-sandbox"
-[ -f "$SANDBOX" ] && stat -c '%U %a %n' "$SANDBOX" | tee "$OUT/chrome-sandbox-mode.txt"
+[[ -f "$SANDBOX" ]] && stat -c '%U %a %n' "$SANDBOX" | tee "$OUT/chrome-sandbox-mode.txt"
 
 launch_and_check deb "$BIN"
 
 echo "== Removing $PKG"
 sudo apt-get remove -y "$PKG"
-if [ -e "$BIN" ]; then echo "binary still present after remove"; exit 1; fi
+if [[ -e "$BIN" ]]; then echo "binary still present after remove"; exit 1; fi
 
 chmod +x "$APPIMAGE"
 launch_and_check appimage "$APPIMAGE"
