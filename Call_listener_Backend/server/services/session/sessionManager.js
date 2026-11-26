@@ -41,11 +41,25 @@ function enableResume(session) {
 }
 
 /**
+ * An explicit end that prepares the debrief has started. Returns a signal
+ * that aborts if the socket closes first; such a close purges the session
+ * instead of holding it for a resume.
+ */
+function beginEnd(session) {
+  session.ending ??= new AbortController();
+  return session.ending.signal;
+}
+
+/**
  * In-memory registry of live interview sessions and their lifecycle:
  *
  *   active ──socket close──▶ disconnected ──resume──▶ active
  *      │                          │
  *      └──{ end: true }──▶ ended  └──resume window elapses──▶ expired
+ *
+ * An end that prepares the debrief (`{ end: { debrief: true } }`) stays
+ * active until the debrief is sent; a socket close meanwhile aborts it and
+ * purges the session (no resume window).
  *
  * Only sessions whose client advertised the `resume` capability enter
  * `disconnected`; every other session is torn down and purged on socket close
@@ -100,6 +114,8 @@ export function createSessionManager({
       streamManager: createStreamManager(id),
       expiryTimer: null,
       disconnectedAt: null,
+      // Set while an explicit end prepares the debrief (see beginEnd).
+      ending: null,
     };
     sessions.set(id, session);
     return session;
@@ -176,7 +192,8 @@ export function createSessionManager({
   /** The socket bound to `session` closed. Stale sockets (already replaced) are ignored. */
   async function disconnect(session, socket) {
     if (session.socket !== socket) return;
-    if (!session.resumable || session.state !== SESSION_STATE.ACTIVE) {
+    session.ending?.abort(new Error("socket closed"));
+    if (!session.resumable || session.state !== SESSION_STATE.ACTIVE || session.ending) {
       session.socket = null;
       session.channel.detach();
       await finish(session, SESSION_STATE.ENDED);
@@ -231,6 +248,7 @@ export function createSessionManager({
     resume,
     disconnect,
     end,
+    beginEnd,
     get: (id) => sessions.get(id),
     get size() {
       return sessions.size;

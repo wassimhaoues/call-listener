@@ -17,8 +17,14 @@ import {
   encodeResumeMessage,
 } from "@/services/interviewMessages.js";
 import { nextReconnectDelay, randomFraction } from "@/services/reconnectPolicy.js";
+import { CLIENT_DEBRIEF_REASON } from "@/services/debriefState.js";
 
 const WEBSOCKET_OPEN = 1;
+// How long "Stop and review" waits for the debrief. The server bounds its own
+// generation well below this.
+export const DEBRIEF_WAIT_MS = 45_000;
+
+const debriefFailure = (reason) => ({ status: "failed", reason });
 const RESUME_FAILURES = new Set(["resume_expired", "resume_rejected"]);
 
 // How a socket was opened: the first connection, a retry after an unexpected
@@ -71,6 +77,8 @@ export function useInterviewSocket({
   const resumeRef = useRef(emptyResume());
   const reconnectRef = useRef(idleReconnect());
   const optionsRef = useRef(null);
+  // Cancels a pending "Stop and review" wait (unmount, or a later end()).
+  const cancelReviewRef = useRef(null);
   optionsRef.current = { dispatch, isPaused, getContext, getWsUrl, random, now };
 
   const emit = useCallback((action) => optionsRef.current.dispatch(action), []);
@@ -306,25 +314,92 @@ export function useInterviewSocket({
     [isOpen]
   );
 
-  // Sends `{ end: true }` and closes. Idempotent: later calls are no-ops, a
-  // connect() still waiting for its URL will not open a socket, and any
-  // pending reconnect is cancelled.
-  const end = useCallback(() => {
+  // Stop the session's live use: no more reconnects, resumes, or sends, and
+  // a connect() still waiting for its URL will not open a socket. Returns the
+  // socket, now detached from the live handlers, or null.
+  const detachSocket = useCallback(() => {
     sessionRef.current += 1;
     resetReconnect();
     resumeRef.current = emptyResume();
     readyRef.current = false;
     awaitingResumeRef.current = false;
     const ws = wsRef.current;
-    if (!ws) return;
     wsRef.current = null;
+    return ws;
+  }, [resetReconnect]);
+
+  // Sends `{ end: true }` and closes. Idempotent: later calls are no-ops, a
+  // connect() still waiting for its URL will not open a socket, and any
+  // pending reconnect is cancelled. Also cancels a pending review wait.
+  const end = useCallback(() => {
+    cancelReviewRef.current?.();
+    const ws = detachSocket();
     try {
       ws.send(encodeEndMessage());
     } catch {}
     try {
       ws.close();
     } catch {}
-  }, [resetReconnect]);
+  }, [detachSocket]);
+
+  // "Stop and review": sends `{ end: { debrief: true } }`, keeps the socket
+  // open only to receive the `{ debrief }` answer, then closes it. Resolves
+  // with the server's debrief object, or a client-side failure when the
+  // socket closes first or nothing arrives within `timeoutMs`. Never
+  // reconnects; the review is not stored anywhere.
+  const endWithReview = useCallback(
+    ({ timeoutMs = DEBRIEF_WAIT_MS } = {}) => {
+      const ws = detachSocket();
+      if (ws?.readyState !== WEBSOCKET_OPEN) {
+        try {
+          ws?.close();
+        } catch {
+          // Already closed.
+        }
+        return Promise.resolve(debriefFailure(CLIENT_DEBRIEF_REASON.DISCONNECTED));
+      }
+      return new Promise((resolve) => {
+        let timer = null;
+        let settled = false;
+        const finish = (result) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          cancelReviewRef.current = null;
+          try {
+            ws.close();
+          } catch {
+            // Already closed.
+          }
+          resolve(result);
+        };
+        timer = setTimeout(() => finish(debriefFailure(CLIENT_DEBRIEF_REASON.NO_RESPONSE)), timeoutMs);
+        cancelReviewRef.current = () => finish(debriefFailure(CLIENT_DEBRIEF_REASON.CANCELLED));
+        // Every other server message (late transcripts, seq bookkeeping) is
+        // irrelevant once the interview has ended.
+        ws.onmessage = (event) => {
+          let message;
+          try {
+            message = JSON.parse(event.data);
+          } catch {
+            return;
+          }
+          const debrief = message?.debrief;
+          if (debrief && typeof debrief === "object") finish(debrief);
+        };
+        ws.onclose = () => finish(debriefFailure(CLIENT_DEBRIEF_REASON.DISCONNECTED));
+        ws.onerror = () => {
+          // A failed socket also closes; onclose reports it.
+        };
+        try {
+          ws.send(encodeEndMessage({ debrief: true }));
+        } catch {
+          finish(debriefFailure(CLIENT_DEBRIEF_REASON.DISCONNECTED));
+        }
+      });
+    },
+    [detachSocket]
+  );
 
   useEffect(() => end, [end]);
 
@@ -335,6 +410,7 @@ export function useInterviewSocket({
     sendInterviewerQuestion,
     sendResponseAction,
     end,
+    endWithReview,
     startNewSession,
   };
 }

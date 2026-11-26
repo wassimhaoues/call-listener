@@ -6,6 +6,11 @@
       "content": "Open with your billing migration: scope, risk, and the zero-data-loss result.",
       "usage_metadata": { "input_tokens": 900, "output_tokens": 60, "total_tokens": 960 }
     },
+    "debriefReview": {
+      "kind": "success",
+      "content": "```json\n{\"questionsCovered\":[{\"question\":\"Tell me about a time you led a migration.\",\"candidateAnswerSummary\":\"You described moving the billing service to managed PostgreSQL.\",\"evidenceUsed\":[\"evidence-1\",\"evidence-9\",\"evidence-1\"]}],\"strengths\":[\"You named a concrete system you worked on.\"],\"improvementTopics\":[{\"topic\":\"Close with the result\",\"why\":\"Your spoken answer did not mention the zero-data-loss outcome.\",\"practiceSuggestion\":\"Practise ending each story with one measurable result.\"}],\"followUpDraft\":\"Thank you for the conversation about the Platform Engineer role and the billing migration.\",\"hiringScore\":9}\n```",
+      "usage_metadata": { "input_tokens": 2000, "output_tokens": 400, "total_tokens": 2400 }
+    },
     "migrationAnswer": {
       "kind": "success",
       "content": [

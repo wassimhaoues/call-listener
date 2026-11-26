@@ -87,7 +87,7 @@ export function isCandidateInterviewContext(value) {
  * capability names are ignored so newer clients can talk to older servers; a
  * malformed list is rejected.
  */
-export const CLIENT_CAPABILITIES = Object.freeze(["stream", "resume", "actions"]);
+export const CLIENT_CAPABILITIES = Object.freeze(["stream", "resume", "actions", "debrief"]);
 
 const ClientCapabilitiesSchema = z.array(text(32).min(1)).max(8).optional();
 
@@ -116,4 +116,13 @@ export function parseClientCapabilities(value) {
  */
 export function requestsSessionResume(value) {
   return parseClientCapabilityNames(value).includes("resume");
+}
+
+/**
+ * Whether the client can receive the end-of-interview debrief, so it may end
+ * with `{ end: { debrief: true } }`. Like the other capabilities it follows
+ * the latest accepted context.
+ */
+export function requestsDebrief(value) {
+  return parseClientCapabilityNames(value).includes("debrief");
 }

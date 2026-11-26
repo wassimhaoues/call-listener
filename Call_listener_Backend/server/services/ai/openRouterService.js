@@ -93,6 +93,10 @@ function withRequestDeadline(signal, timeoutMs) {
   };
 }
 
+function isPositiveInteger(value) {
+  return Number.isInteger(value) && value > 0;
+}
+
 function actualModelFrom(response) {
   const metadata = response?.response_metadata || {};
   const actual = metadata.model_name || metadata.model;
@@ -122,25 +126,28 @@ export function createOpenRouterReplyGenerator({
   }
   const allowed = allowedModels ? new Set(allowedModels) : null;
   const clients = new Map();
-  const clientFor = (modelId) => {
-    if (!clients.has(modelId)) {
+  // One client per (model, output cap): a request may ask for its own cap
+  // (the end-of-interview debrief does), every other request uses the default.
+  const clientFor = (modelId, tokens = maxOutputTokens) => {
+    const key = JSON.stringify([modelId, tokens ?? null]);
+    if (!clients.has(key)) {
       // `streamUsage` asks for token usage on streamed responses too, so the
       // interview budget records reported (not estimated) cost when it can.
-      clients.set(modelId, new ChatOpenRouterClass({
+      clients.set(key, new ChatOpenRouterClass({
         apiKey,
         model: modelId,
-        maxTokens: maxOutputTokens,
+        maxTokens: tokens,
         streamUsage: true,
       }));
     }
-    return clients.get(modelId);
+    return clients.get(key);
   };
   clientFor(model);
 
   return async function generateReply(
     systemPrompt,
     formattedHistory,
-    { signal, onUsage, onModel, onToken, model: requestedModel } = {}
+    { signal, onUsage, onModel, onToken, model: requestedModel, maxOutputTokens: requestedMaxTokens, timeoutMs } = {}
   ) {
     const selectedModel = requestedModel || model;
     if (allowed && !allowed.has(selectedModel)) {
@@ -148,11 +155,13 @@ export function createOpenRouterReplyGenerator({
       error.code = "unsupported_model";
       throw error;
     }
-    const deadline = withRequestDeadline(signal, requestTimeoutMs);
+    const tokens = isPositiveInteger(requestedMaxTokens) ? requestedMaxTokens : maxOutputTokens;
+    const deadlineMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : requestTimeoutMs;
+    const deadline = withRequestDeadline(signal, deadlineMs);
     try {
       log?.info(`Generating AI reply through OpenRouter model ${selectedModel}...`);
       const messages = [new SystemMessage(systemPrompt), new HumanMessage(formattedHistory)];
-      const client = clientFor(selectedModel);
+      const client = clientFor(selectedModel, tokens);
       // Streaming is opt-in per request; without `onToken` the adapter keeps
       // the single `invoke` call it has always made.
       const { text, usage, actual } = typeof onToken === "function"

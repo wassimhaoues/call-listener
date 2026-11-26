@@ -135,7 +135,7 @@ export class FakeServerSocket extends EventEmitter {
  * stream manager, Deepgram service, and Redis-backed stores the way
  * `connectionHandler.js` does. Only the network edges are fakes.
  */
-export function createSessionHarness({ resumeWindowMs = 120_000, replayLimits } = {}) {
+export function createSessionHarness({ resumeWindowMs = 120_000, replayLimits, generateDebrief } = {}) {
   const redis = createMemoryRedis();
   const ChatHistory = createChatHistory({ redisClient: redis, log: silentLog });
   const ContextStore = createContextStore({ redisClient: redis, log: silentLog });
@@ -175,6 +175,7 @@ export function createSessionHarness({ resumeWindowMs = 120_000, replayLimits } 
     generateReply: generator.generateReply,
     buildPrompt,
     parseContext: parseInterviewContext,
+    generateDebrief,
     log: silentLog,
   });
   const handleConnection = createConnectionHandler({ sessions, handleMessage, log: silentLog });
