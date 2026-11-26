@@ -39,6 +39,12 @@ export function pricingFrom({ pricing, inputUsdPerMillionTokens, outputUsdPerMil
  * is passed explicitly so this service never assumes one provider's costs for
  * another provider. Each reply is priced with the model that served it, as
  * the adapter reports in the usage basis (`{ model, actualModel }`).
+ *
+ * Two ceilings stop generation: `maxUsd` of charged cost and, optionally,
+ * `maxCalls` charged model calls (every attempt that reports or is estimated
+ * to have used tokens), which bounds a session even when a model is cheap or
+ * mispriced. Both counters are updated atomically (HINCRBYFLOAT / HINCRBY), so
+ * concurrent charges for one session are never lost.
  */
 export function createInterviewBudget({
   redisClient,
@@ -47,10 +53,14 @@ export function createInterviewBudget({
   inputUsdPerMillionTokens,
   outputUsdPerMillionTokens,
   ttlSeconds = DEFAULT_TTL_SECONDS,
+  maxCalls = Infinity,
   log = loggers.ai,
 } = {}) {
   if (!redisClient) throw new TypeError("redisClient is required");
   asNonNegativeNumber(maxUsd, "maxUsd");
+  if (maxCalls !== Infinity && (!Number.isInteger(maxCalls) || maxCalls < 1)) {
+    throw new TypeError("maxCalls must be a positive integer");
+  }
   const pricing = pricingFrom({ pricing: modelPricing, inputUsdPerMillionTokens, outputUsdPerMillionTokens, log });
   if (!Number.isInteger(ttlSeconds) || ttlSeconds < 1) {
     throw new TypeError("ttlSeconds must be a positive integer");
@@ -58,16 +68,16 @@ export function createInterviewBudget({
 
   const keyFor = (sessionId) => `budget:${sessionId}`;
 
-  async function getSpentUsd(sessionId) {
-    const raw = await redisClient.hget(keyFor(sessionId), "spentUsd");
-    const spentUsd = Number(raw || 0);
-    return Number.isFinite(spentUsd) && spentUsd >= 0 ? spentUsd : 0;
+  async function readCounter(sessionId, field) {
+    const value = Number((await redisClient.hget(keyFor(sessionId), field)) || 0);
+    return Number.isFinite(value) && value >= 0 ? value : 0;
   }
 
   return {
     async canGenerate(sessionId) {
-      const spentUsd = await getSpentUsd(sessionId);
-      return { allowed: spentUsd < maxUsd, spentUsd, maxUsd };
+      const spentUsd = await readCounter(sessionId, "spentUsd");
+      const calls = await readCounter(sessionId, "calls");
+      return { allowed: spentUsd < maxUsd && calls < maxCalls, spentUsd, maxUsd, calls };
     },
 
     /**
@@ -101,17 +111,19 @@ export function createInterviewBudget({
       }
       const price = pricing.resolve(estimateBasis);
       const costUsd = tokensCostUsd(price, inputTokens, outputTokens);
-      const spentUsd = await getSpentUsd(sessionId) + costUsd;
-      await redisClient.hset(keyFor(sessionId), {
-        spentUsd: String(spentUsd),
+      const key = keyFor(sessionId);
+      const spentUsd = Number(await redisClient.hincrbyfloat(key, "spentUsd", costUsd));
+      const calls = Number(await redisClient.hincrby(key, "calls", 1));
+      await redisClient.hset(key, {
         lastInputTokens: String(inputTokens),
         lastOutputTokens: String(outputTokens),
         lastUsageEstimated: estimated ? "1" : "0",
         lastPricedModel: price.model || "default",
       });
-      await redisClient.expire(keyFor(sessionId), ttlSeconds);
+      await redisClient.expire(key, ttlSeconds);
       log.debug(`Recorded provider usage for session [${sessionId}]`);
-      return { costUsd, spentUsd, maxUsd, exhausted: spentUsd >= maxUsd, estimated, model: price.model };
+      const exhausted = spentUsd >= maxUsd || calls >= maxCalls;
+      return { costUsd, spentUsd, maxUsd, calls, exhausted, estimated, model: price.model };
     },
 
     async clear(sessionId) {

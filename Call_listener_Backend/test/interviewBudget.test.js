@@ -7,6 +7,18 @@ function createRedis() {
   return {
     async hget(key, field) { return values.get(key)?.[field] || null; },
     async hset(key, fields) { values.set(key, { ...(values.get(key) || {}), ...fields }); },
+    async hincrbyfloat(key, field, delta) {
+      const hash = { ...(values.get(key) || {}) };
+      hash[field] = String(Number(hash[field] || 0) + delta);
+      values.set(key, hash);
+      return hash[field];
+    },
+    async hincrby(key, field, delta) {
+      const hash = { ...(values.get(key) || {}) };
+      hash[field] = String(Number(hash[field] || 0) + delta);
+      values.set(key, hash);
+      return Number(hash[field]);
+    },
     async expire() {},
     async del(key) { values.delete(key); },
   };
@@ -25,6 +37,7 @@ test("records OpenRouter token usage and blocks the next generation at the inter
     allowed: true,
     spentUsd: 0,
     maxUsd: 0.001,
+    calls: 0,
   });
   const first = await budget.recordUsage("session-1", {
     input_tokens: 1_000,
@@ -100,4 +113,40 @@ test("estimates only the token count the provider omitted", async () => {
   assert.equal(reported.estimated, false, "a reported zero is not replaced by an estimate");
   assert.ok(Math.abs(reported.costUsd - (10 * 0.2) / 1_000_000) < 1e-15);
   assert.equal(warnings.length, 1);
+});
+
+test("maxCalls stops generation after that many charged model calls", async () => {
+  const budget = createInterviewBudget({
+    redisClient: createRedis(),
+    maxUsd: 100,
+    maxCalls: 2,
+    inputUsdPerMillionTokens: 0,
+    outputUsdPerMillionTokens: 0,
+    log: { debug() {}, warn() {} },
+  });
+  const first = await budget.recordUsage("s", { input_tokens: 10, output_tokens: 10 });
+  assert.equal(first.exhausted, false);
+  assert.equal((await budget.canGenerate("s")).allowed, true);
+  const second = await budget.recordUsage("s", { input_tokens: 10, output_tokens: 10 });
+  assert.equal(second.calls, 2);
+  assert.equal(second.exhausted, true);
+  assert.deepEqual(await budget.canGenerate("s"), { allowed: false, spentUsd: 0, maxUsd: 100, calls: 2 });
+  assert.throws(
+    () => createInterviewBudget({ redisClient: createRedis(), maxUsd: 1, maxCalls: 0, inputUsdPerMillionTokens: 0, outputUsdPerMillionTokens: 0 }),
+    /maxCalls/
+  );
+});
+
+test("concurrent charges for one session are all counted", async () => {
+  const budget = createInterviewBudget({
+    redisClient: createRedis(),
+    maxUsd: 100,
+    inputUsdPerMillionTokens: 1_000_000,
+    outputUsdPerMillionTokens: 0,
+    log: { debug() {}, warn() {} },
+  });
+  await Promise.all([1, 2, 3, 4].map(() => budget.recordUsage("s", { input_tokens: 1, output_tokens: 0 })));
+  const { spentUsd, calls } = await budget.canGenerate("s");
+  assert.equal(spentUsd, 4);
+  assert.equal(calls, 4);
 });

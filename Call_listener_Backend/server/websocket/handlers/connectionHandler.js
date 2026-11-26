@@ -37,6 +37,7 @@ const Budget = CONFIG.AI_PROVIDER === "openrouter"
   ? createInterviewBudget({
     redisClient: redis,
     maxUsd: CONFIG.MAX_INTERVIEW_COST_USD,
+    maxCalls: CONFIG.MAX_INTERVIEW_MODEL_CALLS,
     // Each reply is charged at the price of the model that served it.
     pricing: createConfiguredPricing(CONFIG, loggers.ai),
   })

@@ -98,6 +98,18 @@ export function createMemoryRedis({ now = () => Date.now() } = {}) {
       hashes.set(key, { ...(hashes.get(key) || {}), ...fields });
       return Object.keys(fields).length;
     },
+    async hincrbyfloat(key, field, delta) {
+      const hash = { ...(hashes.get(key) || {}) };
+      hash[field] = String(Number(hash[field] || 0) + Number(delta));
+      hashes.set(key, hash);
+      return hash[field];
+    },
+    async hincrby(key, field, delta) {
+      const hash = { ...(hashes.get(key) || {}) };
+      hash[field] = String(Number.parseInt(hash[field] || "0", 10) + Number.parseInt(delta, 10));
+      hashes.set(key, hash);
+      return Number(hash[field]);
+    },
     async hgetall(key) {
       return { ...(hashes.get(key) || {}) };
     },
