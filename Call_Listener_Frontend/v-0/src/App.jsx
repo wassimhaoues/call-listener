@@ -8,6 +8,8 @@ import Conversation from "@/pages/Conversation.jsx";
 import AuthError from "@/pages/AuthError.jsx";
 import NoVBCable from "@/pages/NoVBCable.jsx";
 import Unsupported from "@/pages/Unsupported.jsx";
+import Diagnostics from "@/pages/Diagnostics.jsx";
+import Connecting from "@/pages/Connecting.jsx";
 
 export default function App() {
   return (
@@ -20,6 +22,8 @@ export default function App() {
           <Route path="/autherror" element={<AuthError />} />
           <Route path="/novbcable" element={<NoVBCable />} />
           <Route path="/unsupported" element={<Unsupported />} />
+          <Route path="/diagnostics" element={<Diagnostics />} />
+          <Route path="/connecting" element={<Connecting />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

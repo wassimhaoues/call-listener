@@ -1,29 +1,28 @@
 // FILE: src/layout/AppShell.jsx
 import React, { useEffect } from "react";
-import { Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useUI } from "@/ui/UIContext.jsx";
-import { Moon, Sun } from "lucide-react";
+import { Activity, Moon, Sun } from "lucide-react";
+
+const ROUTE_TITLES = {
+  "/": "Setup",
+  "/context": "Call Context",
+  "/conversation": "Live Conversation",
+  "/novbcable": "Audio Device Check",
+  "/autherror": "Authentication",
+  "/unsupported": "Unsupported OS",
+  "/diagnostics": "Diagnostics",
+  "/connecting": "Connecting",
+};
 
 export default function AppShell() {
   const { title, actions, toggleTheme, theme, setTitle, setActions } = useUI();
   const { pathname } = useLocation();
+  const nav = useNavigate();
 
   // Default title per route (pages can override in useEffect)
   useEffect(() => {
-    const routeTitle =
-      pathname === "/"
-        ? "Setup"
-        : pathname === "/context"
-        ? "Call Context"
-        : pathname === "/conversation"
-        ? "Live Conversation"
-        : pathname === "/novbcable"
-        ? "Audio Device Check"
-        : pathname === "/autherror"
-        ? "Authentication"
-        : pathname === "/unsupported"
-        ? "Unsupported OS"
-        : "Call Listener";
+    const routeTitle = ROUTE_TITLES[pathname] || "Call Listener";
     setTitle(routeTitle);
     if (pathname !== "/conversation") setActions(null);
   }, [pathname, setTitle, setActions]);
@@ -42,6 +41,16 @@ export default function AppShell() {
 
         <div className="app-no-drag flex items-center gap-2">
           {actions}
+          {pathname !== "/diagnostics" && (
+            <button
+              className="btn btn-ghost h-8 px-2"
+              onClick={() => nav("/diagnostics")}
+              aria-label="Open diagnostics"
+              title="Diagnostics"
+            >
+              <Activity size={16} />
+            </button>
+          )}
           <button
             className="btn btn-ghost h-8 px-2"
             onClick={toggleTheme}

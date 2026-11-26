@@ -1,6 +1,6 @@
 # Linux Desktop Support Plan
 
-Status: active Phase 0 workstream. The tested capability module is complete; runtime integration and capture qualification remain pending. It extends the candidate-facing application; it does not add interviewer-facing features.
+Status: active Phase 0 workstream. The tested capability module, the platform-audio adapter extraction (L1), and the diagnostics screen are complete; live Ubuntu qualification and system-audio capture remain pending. It extends the candidate-facing application; it does not add interviewer-facing features.
 
 ## Supported baseline
 
@@ -20,6 +20,8 @@ Introduce a platform-audio interface in the Electron main process:
 | `stop()` | Disable routing and restore playback | Stop only streams created by the app |
 | `recover()` | Restore saved playback after a crash | Clear local capture state |
 
+Implemented interface (L1, `services/platformAudio/index.js`): `prepare()`, `ensureReady()`, `offerDeviceInstall()`, `waitForDevice()`, `enableRouting()`, `disableRouting()`, `isRoutingActive()`, `recoverIfDirty()`, `onSuspend()`/`onResume()`, `gracefulExit()`, and `describe()`; capabilities still come from `services/platformCapabilities.js`. `startSystemCapture()` is deferred to L2.
+
 The renderer receives a platform-neutral capability/stream result through narrow preload IPC. It must not depend on `SoundVolumeView.exe`, PowerShell, `pactl`, or platform-specific device IDs.
 
 Linux capture order:
@@ -35,17 +37,17 @@ Do not install drivers, create virtual sinks, run sound-server commands, or alte
 ### L0 — Linux baseline and test harness
 
 - [x] Add a tested pure platform-capability module with Windows, Linux, and unsupported-platform fixtures.
-- [ ] Add a diagnostic screen with OS, display server, capture strategy, selected sources, and actionable errors without host identifiers.
-- [ ] Validate Ubuntu startup and microphone-only mode; source-level branching and renderer tests skip Windows installer, route manager, and watchdog code, and microphone-only mode now provides a bounded typed-question fallback, but a live Electron check is still required.
+- [x] Add a diagnostic screen with OS, display server, capture strategy, audio adapter state, versions, and actionable errors without host identifiers. `/diagnostics` (header activity button) reads `window.callApi.getDiagnostics()`; `services/diagnostics.js` whitelists fields and maps error codes to fixed copy, with a test that hostnames, user names, home paths, IPs, installation IDs, and raw error text never appear. Selected input sources are not shown yet; they arrive with L2 source selection.
+- [ ] Validate Ubuntu startup and microphone-only mode. A local live check on this host (Ubuntu, X11, production renderer build run through Electron 44 with `--no-sandbox`, fake token server) reached Setup in microphone-only mode and showed the diagnostics page; with a backend that accepts but never answers, the window showed "Connecting…" immediately and the server-unreachable page after the 10 s auth timeout. Still open: a real backend session, Wayland, a packaged AppImage/`.deb`, and an actual microphone interview.
 
 Exit gate: the shared candidate workspace opens on Linux without Windows-only dependencies.
 
 ### L1 — Platform adapter extraction
 
-- [ ] Put the existing Windows route manager behind the shared interface without behavior changes.
-- [ ] Add a Linux adapter that owns only app-created streams.
-- [ ] Replace the `win32` block with capability-based routing.
-- [ ] Unit-test adapter choice, idempotent lifecycle, and errors without running platform commands.
+- [x] Put the existing Windows route manager behind the shared interface without behavior changes. `services/platformAudio/windowsAdapter.js` wraps `AudioRouteManager`, and `services/audio.js` itself is untouched; tests assert the adapter calls the manager in the same order the old `main.js` did for startup, crash recovery, polling, and exit. Adapter-level additions: redundant enable/disable calls are skipped, routing changes are serialized, `gracefulExit()` runs once, and routing is never re-enabled after exit. Windows CI (install smoke, VB-Cable restoration) remains the regression gate.
+- [x] Add a Linux adapter that owns only app-created streams. `services/platformAudio/linuxAdapter.js` runs no commands, changes no OS routing, stops only streams registered through `trackStream()`, and reports microphone-only capture until L2.
+- [x] Replace the `win32` block with capability-based routing. `main.js` startup, tray, `powerMonitor` suspend/resume, quit cleanup, and IPC call the adapter chosen by `createPlatformAudio()` from `getPlatformCapabilities()`. The only remaining `win32` check sets the Windows AppUserModelID (shell identity, not audio).
+- [x] Unit-test adapter choice, idempotent lifecycle, and errors without running platform commands (`test/platformAudio.test.js`, an injected fake manager with the `AudioRouteManager` public API, and injected `fs`/logger).
 
 Exit gate: Windows regressions pass and Linux completes microphone-only mode.
 

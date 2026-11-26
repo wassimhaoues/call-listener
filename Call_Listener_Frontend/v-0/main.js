@@ -59,6 +59,8 @@ const { makeTrayTemplate } = require("./services/tray");
 const { installSVVWithProgress } = require("./services/SoundVolumeInstaller");
 const { createProgressWindow } = require("./services/progressWindow");
 const { getPlatformCapabilities } = require("./services/platformCapabilities");
+const { createPlatformAudio } = require("./services/platformAudio");
+const { buildDiagnostics } = require("./services/diagnostics");
 const { getOrCreateInstallationId } = require("./services/installationId");
 // ---- Globals (main process) --------------------------------------------------
 let mainWindow = null;
@@ -86,14 +88,24 @@ function resolveResource(relPath) {
   return fs.existsSync(prodPath) ? prodPath : devPath;
 }
 // --- NEW: SPA routing helper (HashRouter) ------------------------------------
+// The renderer is loaded once; later navigations only change the hash so the
+// "Connecting…" screen can be replaced without a blank reload.
+let rendererLoaded = false;
 async function gotoRoute(route = "/") {
   if (!mainWindow) return;
+  if (rendererLoaded) {
+    await mainWindow.webContents.executeJavaScript(
+      `location.hash = ${JSON.stringify(route)}`
+    );
+    return;
+  }
+  rendererLoaded = true;
   if (isDev) {
     await mainWindow.loadURL(`http://127.0.0.1:5173/#${route}`);
   } else {
     await mainWindow.loadFile(path.join(__dirname, "dist", "index.html"));
     await mainWindow.webContents.executeJavaScript(
-      `location.hash = "${route}"`
+      `location.hash = ${JSON.stringify(route)}`
     );
   }
 }
@@ -203,19 +215,19 @@ async function ensureSVVPresentWithUI(parentWindow) {
     app.quit();
   }
 }
-async function quitApp(audioMgr) {
+async function quitApp(platformAudio) {
   if (quitting) return;
   quitting = true;
   app.isQuiting = true;
   try {
-    await audioMgr?.gracefulExit();
+    await platformAudio?.gracefulExit();
   } catch (e) {
     console.error("[quitApp] gracefulExit error:", e);
   } finally {
     app.quit();
   }
 }
-async function createWindow(authMgr, audioMgr, capabilities) {
+async function createWindow(authMgr, platformAudio, capabilities) {
   console.log(isDev ? "[boot] dev mode" : "[boot] production mode");
 
   mainWindow = new BrowserWindow({
@@ -279,6 +291,17 @@ async function createWindow(authMgr, audioMgr, capabilities) {
   // ---- Renderer-safe APIs ----------------------------------------------------
   ipcMain.handle("auth:getWsUrl", async () => authMgr.makeSignedWsUrl());
   ipcMain.handle("platform:getCapabilities", () => capabilities);
+  ipcMain.handle("diagnostics:get", () =>
+    buildDiagnostics({
+      platform: process.platform,
+      arch: process.arch,
+      env: process.env,
+      capabilities,
+      audio: platformAudio.describe(),
+      appVersion: app.getVersion(),
+      electronVersion: process.versions.electron,
+    })
+  );
   ipcMain.handle("models:list", async () => {
     try {
       return await authMgr.fetchModels();
@@ -287,6 +310,10 @@ async function createWindow(authMgr, audioMgr, capabilities) {
       return null;
     }
   });
+
+  // Show a neutral screen right away; the auth request below is bounded
+  // (services/auth.js) but can still take seconds on a slow or dead backend.
+  await gotoRoute("/connecting");
 
   // ---- Auth gate (do NOT expose token to renderer) --------------------------
   try {
@@ -307,45 +334,42 @@ async function createWindow(authMgr, audioMgr, capabilities) {
     return;
   }
 
-  // Linux reaches the candidate workspace in microphone-only mode until the
-  // PipeWire desktop-audio route has passed its explicit capture qualification.
-  if (process.platform !== "win32") {
-    await gotoRoute("/");
+  // ---- Audio gate -----------------------------------------------------------
+  // The adapter decides what "ready" means: Windows recovers and enables
+  // VB-Cable routing; Linux enters microphone-only mode without touching OS
+  // audio until PipeWire desktop capture is qualified.
+  const startup = await platformAudio.ensureReady();
+  if (startup.status === "ready") {
+    await gotoRoute("/"); // normal entry
     return;
   }
-
-  // ---- Audio gate -----------------------------------------------------------
-  try {
-    await audioMgr.recoverIfDirty(); // restore if previous crash
-    const cableOk = await audioMgr.detectVBCable();
-    if (!cableOk) {
-      console.warn(
-        "[audio] VB-Cable not detected; offering install and polling..."
-      );
-      await gotoRoute("/novbcable"); // <<<< replaced
-      audioMgr.offerInstall(); // non-blocking
-      audioMgr.pollForCable(async () => {
-        await audioMgr.enable();
-        await audioMgr.setDefault(
-          "VB-Audio Virtual Cable\\Device\\CABLE Input\\Render"
-        );
-        await gotoRoute("/"); // <<<< enter app once cable appears
-      }, 3000);
-      return;
-    }
-
-    await audioMgr.enable();
-    await audioMgr.setDefault(
-      "VB-Audio Virtual Cable\\Device\\CABLE Input\\Render"
-    );
-
-    await gotoRoute("/"); // <<<< normal entry
-  } catch (e) {
-    console.error("[audio] startup error:", e);
-    await gotoRoute("/novbcable"); // <<<< replaced
+  await gotoRoute("/novbcable");
+  if (startup.status === "needs-device") {
+    platformAudio.offerDeviceInstall(); // non-blocking
+    platformAudio.waitForDevice(async () => {
+      await gotoRoute("/"); // enter app once the capture device appears
+    }, 3000);
   }
 }
-function createTray(audioMgr) {
+function buildTrayMenu(platformAudio) {
+  return Menu.buildFromTemplate(
+    makeTrayTemplate({
+      isActive: () => platformAudio.isRoutingActive(),
+      onOpen: () => mainWindow?.show(),
+      onToggleRouting: async () => {
+        try {
+          if (platformAudio.isRoutingActive()) await platformAudio.disableRouting();
+          else await platformAudio.enableRouting();
+        } catch (e) {
+          console.error("[tray] routing toggle failed:", e);
+        }
+        tray?.setContextMenu(buildTrayMenu(platformAudio));
+      },
+      onQuit: () => quitApp(platformAudio),
+    })
+  );
+}
+function createTray(platformAudio) {
   try {
     let trayPath =
       findAsset("tray.ico") ||
@@ -361,32 +385,7 @@ function createTray(audioMgr) {
 
     tray = new Tray(img);
     tray.setToolTip("Call Listener");
-    tray.setContextMenu(
-      Menu.buildFromTemplate(
-        makeTrayTemplate({
-          isActive: () => audioMgr.isActive(),
-          onOpen: () => mainWindow?.show(),
-          onToggleRouting: async () => {
-            if (audioMgr.isActive()) await audioMgr.disable();
-            else await audioMgr.enable();
-            tray?.setContextMenu(
-              Menu.buildFromTemplate(
-                makeTrayTemplate({
-                  isActive: () => audioMgr.isActive(),
-                  onOpen: () => mainWindow?.show(),
-                  onToggleRouting: async () => {
-                    if (audioMgr.isActive()) await audioMgr.disable();
-                    else await audioMgr.enable();
-                  },
-                  onQuit: () => quitApp(audioMgr),
-                })
-              )
-            );
-          },
-          onQuit: () => quitApp(audioMgr),
-        })
-      )
-    );
+    tray.setContextMenu(buildTrayMenu(platformAudio));
     tray.on("click", () => mainWindow?.show());
   } catch (e) {
     console.error("[tray] creation failed:", e);
@@ -405,17 +404,19 @@ if (!gotLock) {
   });
 }
 
+// Windows shell identity (taskbar grouping/notifications), not audio routing;
+// audio behavior is chosen by the platform-audio adapter below.
 if (process.platform === "win32") {
   app.setAppUserModelId(APP_ID);
 }
 
 if (isDev) {
-  process.on("SIGINT", () => quitApp(audioMgrRef));
-  process.on("SIGTERM", () => quitApp(audioMgrRef));
+  process.on("SIGINT", () => quitApp(platformAudioRef));
+  process.on("SIGTERM", () => quitApp(platformAudioRef));
 }
 
 // Harden session immediately on ready
-let audioMgrRef = null;
+let platformAudioRef = null;
 app.whenReady().then(async () => {
   // Auto-update signal
   try {
@@ -454,47 +455,51 @@ app.whenReady().then(async () => {
     deviceId: installationId,
   });
 
-  let audioMgr = null;
-  if (process.platform === "win32") {
-    const bootstrapWin = new BrowserWindow({ show: false });
-    await ensureSVVPresentWithUI(bootstrapWin);
-    if (!svvPath || !fs.existsSync(svvPath)) {
-      dialog.showErrorBox("Setup error", "SoundVolumeView is required.");
-      app.quit();
-      return;
-    }
-    audioMgr = new AudioRouteManager({
-      svvPath,
-      vbCableInstaller,
-      userDataDir,
-      logger: console,
-    });
+  const platformAudio = createPlatformAudio({
+    platform: process.platform,
+    capabilities,
+    logger: console,
+    fs,
+    windows: {
+      ensureTools: async () => {
+        const bootstrapWin = new BrowserWindow({ show: false });
+        await ensureSVVPresentWithUI(bootstrapWin);
+        return svvPath;
+      },
+      createManager: (resolvedSvvPath) =>
+        new AudioRouteManager({
+          svvPath: resolvedSvvPath,
+          vbCableInstaller,
+          userDataDir,
+          logger: console,
+        }),
+    },
+  });
+  const prepared = await platformAudio.prepare();
+  if (!prepared.ok) {
+    dialog.showErrorBox("Setup error", "SoundVolumeView is required.");
+    app.quit();
+    return;
   }
-  audioMgrRef = audioMgr;
+  platformAudioRef = platformAudio;
 
-  await createWindow(authMgr, audioMgr, capabilities);
-  if (audioMgr) createTray(audioMgr);
+  await createWindow(authMgr, platformAudio, capabilities);
+  // The tray only carries a routing toggle, so it exists only when the
+  // adapter actually controls OS routing.
+  if (platformAudio.controlsOsRouting) createTray(platformAudio);
 
-  if (audioMgr) {
-    powerMonitor.on("suspend", async () => {
-      console.log("[power] suspend: disabling cable listen");
-      await audioMgr.disable().catch(() => {});
-    });
-    powerMonitor.on("resume", async () => {
-      console.log("[power] resume: restoring cable listen");
-      await audioMgr.enable().catch(() => {});
-    });
-  }
+  powerMonitor.on("suspend", () => platformAudio.onSuspend());
+  powerMonitor.on("resume", () => platformAudio.onResume());
 });
 
 // Last-resort guards
 process.on("uncaughtException", async (err) => {
   console.error("[uncaughtException]", err);
-  await quitApp(audioMgrRef);
+  await quitApp(platformAudioRef);
 });
 process.on("unhandledRejection", async (reason) => {
   console.error("[unhandledRejection]", reason);
-  await quitApp(audioMgrRef);
+  await quitApp(platformAudioRef);
 });
 
 app.on("window-all-closed", () => {
@@ -505,7 +510,7 @@ app.on("before-quit", async () => {
     quitting = true;
     app.isQuiting = true;
     try {
-      await audioMgrRef?.gracefulExit();
+      await platformAudioRef?.gracefulExit();
     } catch (e) {
       console.error("[before-quit] gracefulExit error:", e);
     }

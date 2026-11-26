@@ -1,7 +1,45 @@
 // services/auth.js
+
+// Wall-clock bound for the startup token request. Without it a backend that
+// accepts the TCP/TLS connection but never answers leaves the auth gate (and
+// the window) waiting forever.
+const AUTH_REQUEST_TIMEOUT_MS = 10_000;
+
+/** Timeout error classified as server_unreachable by services/authFailure.js. */
+function makeTimeoutError(label, timeoutMs) {
+  return Object.assign(new Error(`${label} request timed out after ${timeoutMs} ms`), {
+    code: "ETIMEDOUT",
+  });
+}
+
+/**
+ * Settle a request promise at most once, and reject (destroying the request)
+ * if it has not settled within timeoutMs.
+ */
+function withDeadline(req, resolve, reject, { label, timeoutMs }) {
+  let settled = false;
+  const timer = setTimeout(() => {
+    const err = makeTimeoutError(label, timeoutMs);
+    finish(reject, err);
+    try {
+      req.destroy?.(err);
+    } catch {}
+  }, timeoutMs);
+  const finish = (fn, value) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    fn(value);
+  };
+  return {
+    resolve: (value) => finish(resolve, value),
+    reject: (err) => finish(reject, err),
+  };
+}
+
 class AuthManager {
   /**
-   * @param {{ requestClient:any, appId:string, backendHost:string, electronSession: Electron.Session }} opts
+   * @param {{ requestClient:any, appId:string, backendHost:string, electronSession: Electron.Session, requestTimeoutMs?:number }} opts
    */
   constructor(opts) {
     this.requestClient = opts.requestClient;
@@ -17,13 +55,17 @@ class AuthManager {
       throw new TypeError("deviceId is required");
     }
 
+    this.requestTimeoutMs = opts.requestTimeoutMs || AUTH_REQUEST_TIMEOUT_MS;
+
     this.token = null;
     this.refreshTimer = null;
   }
 
   _postToken(deviceId) {
     const payload = JSON.stringify({ app_id: this.appId, device_id: deviceId });
-    return new Promise((resolve, reject) => {
+    return new Promise((outerResolve, outerReject) => {
+      let resolve = outerResolve;
+      let reject = outerReject;
       const req = this.requestClient.request(
         {
           hostname: this.backendHost,
@@ -55,7 +97,11 @@ class AuthManager {
           });
         }
       );
-      req.on("error", reject);
+      ({ resolve, reject } = withDeadline(req, outerResolve, outerReject, {
+        label: "Token",
+        timeoutMs: this.requestTimeoutMs,
+      }));
+      req.on("error", (e) => reject(e));
       req.write(payload);
       req.end();
     });
@@ -119,7 +165,9 @@ class AuthManager {
    */
   async fetchModels({ timeoutMs = 5_000 } = {}) {
     const token = await this.getCachedTokenOrFetch();
-    const body = await new Promise((resolve, reject) => {
+    const body = await new Promise((outerResolve, outerReject) => {
+      let resolve = outerResolve;
+      let reject = outerReject;
       const req = this.requestClient.request(
         {
           hostname: this.backendHost,
@@ -144,8 +192,12 @@ class AuthManager {
           });
         }
       );
-      req.on("timeout", () => req.destroy(new Error("Models request timed out")));
-      req.on("error", reject);
+      ({ resolve, reject } = withDeadline(req, outerResolve, outerReject, {
+        label: "Models",
+        timeoutMs,
+      }));
+      req.on("timeout", () => req.destroy(makeTimeoutError("Models", timeoutMs)));
+      req.on("error", (e) => reject(e));
       req.end();
     });
     return sanitizeCatalog(body);
@@ -177,4 +229,4 @@ function sanitizeCatalog(body) {
   };
 }
 
-module.exports = { AuthManager, sanitizeCatalog };
+module.exports = { AuthManager, sanitizeCatalog, AUTH_REQUEST_TIMEOUT_MS };
