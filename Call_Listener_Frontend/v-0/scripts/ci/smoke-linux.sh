@@ -15,7 +15,8 @@ export DISPLAY="${DISPLAY:-:99}"
 launch_and_check() {
   local label="$1"; shift
   echo "== Launching $label: $*"
-  "$@" >"$OUT/$label-stdout.log" 2>"$OUT/$label-stderr.log" &
+  # Own process group, so the app and its helper processes stop together.
+  setsid "$@" >"$OUT/$label-stdout.log" 2>"$OUT/$label-stderr.log" &
   local pid=$!
   sleep "$RUN_SECONDS"
   import -window root "$OUT/$label.png" || echo "screenshot failed"
@@ -24,16 +25,20 @@ launch_and_check() {
     return 1
   fi
   echo "$label still running after ${RUN_SECONDS}s"
-  kill "$pid"; sleep 2; kill -9 "$pid" 2>/dev/null || true
-  pkill -f "$(basename "$1")" 2>/dev/null || true
+  kill -- "-$pid" 2>/dev/null || true
+  sleep 2
+  kill -9 -- "-$pid" 2>/dev/null || true
 }
 
 echo "== Installing $DEB"
 sudo apt-get install -y "$DEB"
 PKG="$(dpkg-deb -f "$DEB" Package)"
-BIN="$(dpkg -L "$PKG" | grep -E '^/opt/.+/[^/]+$' | while read -r f; do [ -x "$f" ] && [ ! -d "$f" ] && echo "$f"; done | grep -vE 'chrome-sandbox|chrome_crashpad|\.so' | head -1)"
-DESKTOP="$(dpkg -L "$PKG" | grep -E '\.desktop$' | head -1)"
+# The package registers its executable as /usr/bin/<package> via update-alternatives.
+BIN="$(readlink -f "/usr/bin/$PKG" || true)"
+DESKTOP="$(dpkg -L "$PKG" | grep -E '\.desktop$' || true)"
+DESKTOP="${DESKTOP%%$'\n'*}"
 echo "Binary: $BIN"; echo "Desktop entry: $DESKTOP"
+du -sh "$(dirname "$BIN")" | tee "$OUT/install-size.txt"
 [ -n "$BIN" ] || { echo "installed binary not found"; exit 1; }
 [ -n "$DESKTOP" ] && desktop-file-validate "$DESKTOP" | tee "$OUT/desktop-validate.txt" || true
 SANDBOX="$(dirname "$BIN")/chrome-sandbox"
