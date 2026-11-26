@@ -92,7 +92,13 @@ async function runJob(job, { generateReply, providerConfig, now }) {
   });
   const latencyMs = now() - started;
   const fallbackBasis = { inputChars: job.inputChars, outputChars: result.suggestion.length };
-  const cost = usageCost({ usage, basis: basis || fallbackBasis, prices: providerConfig.prices });
+  // A live reply is charged at the price of the model the adapter reports.
+  const cost = usageCost({
+    usage,
+    basis: basis || fallbackBasis,
+    prices: providerConfig.prices,
+    pricing: providerConfig.pricing,
+  });
   const promptEvidenceIds = evidenceIdsFor(job.caseDef, result.promptEvidence);
   const score = scoreAnswer({
     answer: result.suggestion,
