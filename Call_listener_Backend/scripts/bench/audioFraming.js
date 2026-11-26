@@ -11,6 +11,7 @@
  * Usage: node scripts/bench/audioFraming.js [--minutes 1] [--json]
  */
 import { performance } from "node:perf_hooks";
+import { pathToFileURL } from "node:url";
 
 export const SAMPLE_RATE = 48_000;
 export const BYTES_PER_SAMPLE = 2;
@@ -128,4 +129,4 @@ function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();
