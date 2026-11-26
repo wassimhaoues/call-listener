@@ -23,3 +23,14 @@ Traefik routes `https://call.coworky.org` to Express on port 3000 and `wss://cal
 - Tail backend logs for authentication, WebSocket, Deepgram, and AI failures.
 - Rotate `JWT_SECRET`, provider keys, and Redis credentials through the secret store; never put their values in documentation or source control.
 - Verify that the desktop `CALL_HOST`, backend `APP_ID`, and proxy hostname agree before releasing a desktop build.
+
+## Desktop release builds
+
+`.github/workflows/release.yml` builds desktop artifacts when a `vX.Y.Z` tag is pushed (or via manual dispatch with an existing tag):
+
+1. Set `version` in `Call_Listener_Frontend/v-0/package.json`, merge, then tag that commit `vX.Y.Z` and push the tag. The workflow refuses a tag that does not match the package version.
+2. The Windows job downloads SoundVolumeView and VB-Cable with `fetch-windows-deps.ps1 -Strict`, so it fails unless each download matches a reviewed SHA-256 listed in that script. When NirSoft updates SoundVolumeView, review the new release and add its hash before tagging.
+3. Windows NSIS and Linux deb/AppImage packages are built, smoke-tested (install/launch/uninstall), and attached with a `SHA256SUMS` file to a **draft** GitHub Release.
+4. A maintainer reviews the draft and publishes it manually. The workflow never publishes, and refuses to modify a release that is already published.
+
+Builds are unsigned (no code-signing certificate is configured), and `electron-updater` has no publish feed configured, so installed clients do not auto-update from these releases.

@@ -1,0 +1,162 @@
+name: Release (draft)
+
+# Builds release artifacts for a version tag and attaches them to a DRAFT
+# GitHub Release. Nothing is published automatically: a maintainer reviews the
+# draft (artifacts, checksums, notes) and publishes it by hand.
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build (e.g. v1.0.1)"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  verify:
+    name: Verify tag matches package version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag="${INPUT_TAG:-$REF_NAME}"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Tag '$tag' is not of the form vX.Y.Z"; exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+      - name: Compare with package.json version
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          version="$(node -p "require('./Call_Listener_Frontend/v-0/package.json').version")"
+          if [[ "v$version" != "$TAG" ]]; then
+            echo "::error::Tag $TAG does not match Call_Listener_Frontend/v-0/package.json version $version"; exit 1
+          fi
+
+  windows:
+    name: Windows installer (strict dependencies)
+    needs: verify
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: Call_Listener_Frontend/v-0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Call_Listener_Frontend/v-0/package-lock.json
+      # -Strict: fail unless every bundled third-party download matches a
+      # reviewed SHA-256 in fetch-windows-deps.ps1.
+      - name: Fetch bundled Windows tools (strict)
+        run: ./scripts/ci/fetch-windows-deps.ps1 -BinDir bin -Strict
+      - run: npm ci --ignore-scripts
+      - name: Build NSIS installer (unsigned)
+        env:
+          NODE_ENV: production
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          ./node_modules/.bin/vite build
+          ./node_modules/.bin/electron-builder --win nsis --x64 --publish never
+      - name: Smoke test installer
+        run: |
+          $installer = Get-ChildItem dist -Filter *Setup*.exe | Select-Object -First 1
+          ./scripts/ci/smoke-installer.ps1 -Installer $installer.FullName -OutDir ci-smoke
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: Call_Listener_Frontend/v-0/dist/*Setup*.exe
+          if-no-files-found: error
+
+  linux:
+    name: Linux packages
+    needs: verify
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: Call_Listener_Frontend/v-0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.tag }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Call_Listener_Frontend/v-0/package-lock.json
+      - name: Install X11/AppImage runtime tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb imagemagick libfuse2t64 desktop-file-utils
+      - run: npm ci --ignore-scripts
+      - name: Build Linux packages
+        env:
+          NODE_ENV: production
+        run: |
+          ./node_modules/.bin/vite build
+          ./node_modules/.bin/electron-builder --linux deb AppImage --x64 --publish never
+      - name: Smoke test packages under Xvfb
+        run: |
+          Xvfb :99 -screen 0 1280x800x24 &
+          export DISPLAY=:99
+          sleep 2
+          ./scripts/ci/smoke-linux.sh "$(ls dist/*.deb | head -1)" "$(ls dist/*.AppImage | head -1)" ci-linux-smoke 20
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: |
+            Call_Listener_Frontend/v-0/dist/*.deb
+            Call_Listener_Frontend/v-0/dist/*.AppImage
+          if-no-files-found: error
+
+  draft-release:
+    name: Create draft release with checksums
+    needs: [verify, windows, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Checksums
+        working-directory: artifacts
+        run: |
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          notes="Draft built by CI from ${TAG}. Unsigned builds. Review artifacts, checksums, and notes before publishing."
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # Never replace assets of a release that has already been published.
+            is_draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft)"
+            if [[ "$is_draft" != "true" ]]; then
+              echo "::error::Release $TAG is already published; refusing to modify it"; exit 1
+            fi
+            gh release upload "$TAG" artifacts/* --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" artifacts/* --draft --verify-tag \
+              --title "Call Listener ${TAG}" --notes "$notes" --repo "$GITHUB_REPOSITORY"
+          fi
