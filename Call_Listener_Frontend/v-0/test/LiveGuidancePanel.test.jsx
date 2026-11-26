@@ -97,3 +97,12 @@ it("renders session alerts as text", () => {
   render(<LiveGuidancePanel question="" suggestion="" alerts={["<b>Blocked</b>"]} />);
   expect(screen.getByRole("alert")).toHaveTextContent("<b>Blocked</b>");
 });
+
+it("notes a final suggestion that stopped at the length limit", () => {
+  const { rerender } = render(<LiveGuidancePanel question="Q?" suggestion="Lead with the" truncated />);
+  expect(screen.getByText(/reached the length limit/)).toBeInTheDocument();
+  rerender(<LiveGuidancePanel question="Q?" suggestion="Lead with the" truncated isStreaming />);
+  expect(screen.queryByText(/reached the length limit/)).toBeNull();
+  rerender(<LiveGuidancePanel question="Q?" suggestion="Lead with the migration." />);
+  expect(screen.queryByText(/reached the length limit/)).toBeNull();
+});

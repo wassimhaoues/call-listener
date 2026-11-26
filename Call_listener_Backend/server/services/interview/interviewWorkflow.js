@@ -18,6 +18,8 @@ export function createInterviewWorkflow({ buildPrompt, generateReply } = {}) {
     onUsage: Annotation({ default: () => undefined }),
     model: Annotation({ default: () => undefined }),
     onModel: Annotation({ default: () => undefined }),
+    // Optional: told whether the reply stopped at the output-token cap.
+    onFinish: Annotation({ default: () => undefined }),
     // Optional: when set, the reply generator streams text deltas to it.
     onToken: Annotation({ default: () => undefined }),
     // "reply" for an interview answer, or a response-action kind
@@ -49,6 +51,7 @@ export function createInterviewWorkflow({ buildPrompt, generateReply } = {}) {
         onUsage: state.onUsage,
         model: state.model,
         onModel: state.onModel,
+        onFinish: state.onFinish,
         onToken: state.onToken,
       });
       return { suggestion: (suggestion || "").trim() };

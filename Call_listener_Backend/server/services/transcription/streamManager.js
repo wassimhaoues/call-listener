@@ -65,11 +65,11 @@ export class StreamManager {
     this.generateReply = generateReply;
     this.buildPrompt = buildPrompt;
     this.runInterviewWorkflow = runInterviewWorkflow || (async ({
-      context, history, signal, model, onModel, onUsage, onToken, mode = "reply", question, previousAnswer,
+      context, history, signal, model, onModel, onFinish, onUsage, onToken, mode = "reply", question, previousAnswer,
     }) => this.generateReply(
       this.buildPrompt(context, mode, undefined, { question, previousAnswer }),
       history,
-      { signal, model, onModel, onUsage, onToken }
+      { signal, model, onModel, onFinish, onUsage, onToken }
     ));
     this.Budget = Budget;
     this.log = log;
@@ -422,6 +422,7 @@ export class StreamManager {
       // applies to the next request, never to one already in flight.
       const selectedModel = contextObj?.settings?.model;
       let modelInfo = null;
+      let truncated = false;
       const historyStr = await this.ChatHistory.toPrompt(this.sessionId);
       if (!isCurrent()) return;
       this.latestGeneration = generationRecord;
@@ -437,6 +438,7 @@ export class StreamManager {
           onUsage: (usage, estimateBasis) => this.Budget?.recordUsage(this.sessionId, usage, estimateBasis),
           model: selectedModel,
           onModel: (info) => { modelInfo = info; },
+          onFinish: (finish) => { truncated = finish?.truncated === true; },
           onToken: deltas ? (token) => deltas.push(token) : undefined,
         }),
         this.AI_TIMEOUT_MS,
@@ -468,7 +470,9 @@ export class StreamManager {
         this.currentQuestion.answerText = finalText;
       }
       const reply = modelInfo ? { ai_reply: finalText, model: modelInfo } : { ai_reply: finalText };
-      this.sendToClient(identity ? { ...reply, generation: tag("done") } : reply, "reply");
+      // Additive: a streaming client learns the answer was cut at the cap.
+      const done = truncated ? { ...tag("done"), truncated: true } : tag("done");
+      this.sendToClient(identity ? { ...reply, generation: done } : reply, "reply");
     } catch (error) {
       const superseded = generationController.signal.aborted && requestVersion !== this.requestVersion;
       if (!superseded) {

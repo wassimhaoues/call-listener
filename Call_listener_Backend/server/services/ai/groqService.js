@@ -14,7 +14,7 @@ export function createGroqReplyGenerator({
   // always uses its configured model.
   // An optional per-request `maxOutputTokens` (the end-of-interview debrief)
   // becomes `max_tokens`; other requests are sent exactly as before.
-  return async function generateReply(systemPrompt, formattedHistory, { signal, onModel, maxOutputTokens } = {}) {
+  return async function generateReply(systemPrompt, formattedHistory, { signal, onModel, onFinish, maxOutputTokens } = {}) {
     try {
       log?.info("Generating AI reply from Groq...");
       const body = {
@@ -28,6 +28,7 @@ export function createGroqReplyGenerator({
       const response = await client.chat.completions.create(body, { signal });
       const text = response.choices[0]?.message?.content?.trim() || "";
       onModel?.({ selected: model, actual: typeof response.model === "string" ? response.model : null });
+      onFinish?.({ truncated: response.choices[0]?.finish_reason === "length" });
       log?.info(`Groq reply generated (${text.length} chars)`);
       return text;
     } catch (error) {

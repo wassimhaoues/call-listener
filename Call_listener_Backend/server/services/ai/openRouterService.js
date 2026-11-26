@@ -40,7 +40,7 @@ function hasFields(value) {
 }
 
 function newProgress() {
-  return { text: "", usage: undefined, metadataUsage: undefined, actual: null, emitted: false };
+  return { text: "", usage: undefined, metadataUsage: undefined, actual: null, emitted: false, finishReason: null };
 }
 
 function reportedUsage(progress) {
@@ -64,6 +64,7 @@ async function streamReply(client, messages, signal, onToken, progress) {
     progress.usage = addUsage(progress.usage, chunk?.usage_metadata);
     if (hasFields(chunk?.response_metadata?.usage)) progress.metadataUsage = chunk.response_metadata.usage;
     progress.actual = actualModelFrom(chunk) || progress.actual;
+    progress.finishReason = finishReasonFrom(chunk) || progress.finishReason;
     if (delta) {
       progress.text += delta;
       progress.emitted = true;
@@ -71,7 +72,12 @@ async function streamReply(client, messages, signal, onToken, progress) {
     }
   }
   if (signal.aborted) throw signal.reason ?? new Error("aborted");
-  return { text: progress.text.trim(), usage: reportedUsage(progress), actual: progress.actual };
+  return {
+    text: progress.text.trim(),
+    usage: reportedUsage(progress),
+    actual: progress.actual,
+    finishReason: progress.finishReason,
+  };
 }
 
 async function invokeReply(client, messages, signal) {
@@ -80,6 +86,7 @@ async function invokeReply(client, messages, signal) {
     text: contentToText(response.content),
     usage: response.usage_metadata || response.response_metadata?.usage,
     actual: actualModelFrom(response),
+    finishReason: finishReasonFrom(response),
   };
 }
 
@@ -249,6 +256,13 @@ function isPositiveInteger(value) {
   return Number.isInteger(value) && value > 0;
 }
 
+// LangChain copies the provider's `finish_reason` into `response_metadata`
+// for invoked responses and for the final streamed chunk.
+function finishReasonFrom(response) {
+  const reason = response?.response_metadata?.finish_reason;
+  return typeof reason === "string" && reason ? reason.slice(0, 40) : null;
+}
+
 function actualModelFrom(response) {
   const metadata = response?.response_metadata || {};
   const actual = metadata.model_name || metadata.model;
@@ -309,7 +323,16 @@ export function createOpenRouterReplyGenerator({
   return async function generateReply(
     systemPrompt,
     formattedHistory,
-    { signal, onUsage, onModel, onToken, model: requestedModel, maxOutputTokens: requestedMaxTokens, timeoutMs } = {}
+    {
+      signal,
+      onUsage,
+      onModel,
+      onToken,
+      onFinish,
+      model: requestedModel,
+      maxOutputTokens: requestedMaxTokens,
+      timeoutMs,
+    } = {}
   ) {
     const selectedModel = requestedModel || model;
     if (allowed && !allowed.has(selectedModel)) {
@@ -340,10 +363,14 @@ export function createOpenRouterReplyGenerator({
       const attempt = typeof onToken === "function"
         ? (progress) => streamReply(client, messages, deadline.signal, onToken, progress)
         : () => invokeReply(client, messages, deadline.signal);
-      const { text, usage, actual } = await runAttempts({ attempt, run, policy, deadline, random, log });
+      const { text, usage, actual, finishReason } = await runAttempts({ attempt, run, policy, deadline, random, log });
       run.charged = true;
       await onUsage?.(usage, usageBasis(text.length, actual));
       onModel?.({ selected: selectedModel, actual });
+      // The reply hit the output-token cap and ends mid-thought.
+      const truncated = finishReason === "length";
+      if (truncated) log?.warn?.(`OpenRouter reply stopped at the output limit (${tokens ?? "default"} tokens)`);
+      onFinish?.({ truncated });
       log?.info(`OpenRouter reply generated (${text.length} chars, ${run.attempts} attempt(s))`);
       return text;
     } catch (error) {

@@ -334,6 +334,7 @@ export default function Conversation() {
               evidence={evidenceReferences}
               isThinking={state.isThinking}
               isStreaming={state.isStreaming}
+              truncated={state.suggestionTruncated}
               model={state.model}
               alerts={alerts}
               generationKind={state.generationKind}
