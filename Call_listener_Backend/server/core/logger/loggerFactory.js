@@ -1,6 +1,6 @@
 import { createLogger, format } from "winston";
 import { createFileTransport } from "./transports/fileTransport.js";
-import { consoleTransport } from "./transports/console.js";
+import { createConsoleTransport } from "./transports/console.js";
 import { prodFormat } from "./formats.js";
 
 export function createServiceLogger(serviceName) {
@@ -17,8 +17,8 @@ export function createServiceLogger(serviceName) {
             format.simple()
           ),
     transports: logToFile
-      ? [consoleTransport, createFileTransport(serviceName)]
-      : [consoleTransport],
+      ? [createConsoleTransport(serviceName), createFileTransport(serviceName)]
+      : [createConsoleTransport(serviceName)],
     exitOnError: false,
   });
 
