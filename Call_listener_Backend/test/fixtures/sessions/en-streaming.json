@@ -20,9 +20,9 @@
       "provider": "streamedAnswer",
       "expect": [
         { "speaker": "caller", "transcript": "Tell me about a time you led a migration." },
-        { "generation": { "id": "g1", "state": "thinking" } },
-        { "generation": { "id": "g1", "state": "streaming" }, "delta": "Situation: a legacy billing database. Action: staged dual writes.  " },
-        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes.", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g1", "state": "done" } }
+        { "generation": { "id": "g1", "kind": "answer", "state": "thinking" } },
+        { "generation": { "id": "g1", "kind": "answer", "state": "streaming" }, "delta": "Situation: a legacy billing database. Action: staged dual writes.  " },
+        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes.", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g1", "kind": "answer", "state": "done" } }
       ]
     },
     { "label": "question 2 final", "type": "transcript", "source": "system", "text": "How did you keep the cutover safe?", "isFinal": true, "expect": [] },
@@ -34,7 +34,7 @@
       "waitFor": "providerStreamed",
       "expect": [
         { "speaker": "caller", "transcript": "How did you keep the cutover safe?" },
-        { "generation": { "id": "g2", "state": "thinking" } }
+        { "generation": { "id": "g2", "kind": "answer", "state": "thinking" } }
       ]
     },
     { "label": "question 3 final", "type": "transcript", "source": "system", "text": "What would you do differently next time?", "isFinal": true, "expect": [] },
@@ -45,9 +45,9 @@
       "provider": "streamedMissingUsage",
       "expect": [
         { "speaker": "caller", "transcript": "What would you do differently next time?" },
-        { "generation": { "id": "g3", "state": "thinking" } },
-        { "generation": { "id": "g3", "state": "streaming" }, "delta": "Rehearse the rollback earlier." },
-        { "ai_reply": "Rehearse the rollback earlier.", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g3", "state": "done" } }
+        { "generation": { "id": "g3", "kind": "answer", "state": "thinking" } },
+        { "generation": { "id": "g3", "kind": "answer", "state": "streaming" }, "delta": "Rehearse the rollback earlier." },
+        { "ai_reply": "Rehearse the rollback earlier.", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g3", "kind": "answer", "state": "done" } }
       ]
     },
     {
@@ -57,8 +57,8 @@
       "provider": "rateLimited",
       "expect": [
         { "speaker": "caller", "transcript": "Why do you want to join this team?" },
-        { "generation": { "id": "g4", "state": "thinking" } },
-        { "generation": { "id": "g4", "state": "failed" }, "ai_reply": "[Erreur du modèle]" }
+        { "generation": { "id": "g4", "kind": "answer", "state": "thinking" } },
+        { "generation": { "id": "g4", "kind": "answer", "state": "failed" }, "ai_reply": "[Erreur du modèle]" }
       ]
     },
     {
@@ -69,7 +69,7 @@
       "waitFor": "providerStreamed",
       "expect": [
         { "speaker": "caller", "transcript": "Do you have any questions for us?" },
-        { "generation": { "id": "g5", "state": "thinking" } }
+        { "generation": { "id": "g5", "kind": "answer", "state": "thinking" } }
       ]
     },
     { "label": "end aborts the open stream without any delta or reply", "type": "end", "expect": [] }

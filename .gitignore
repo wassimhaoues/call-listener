@@ -32,6 +32,9 @@ coverage/
 # Claude Code agent worktrees
 .claude/worktrees/
 
+# Offline evaluation reports (npm run eval)
+eval-results/
+
 # CI result folders
 Call_Listener_Frontend/v-0/ci-*/
 Call_Listener_Frontend/v-0/installer/

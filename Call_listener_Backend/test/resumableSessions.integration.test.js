@@ -90,7 +90,7 @@ test("a dropped connection resumes over a real WebSocket without regenerating", 
     await second.waitFor((m) => m.notice === "audio_gap", "the audio gap notice");
     assert.deepEqual(second.received.slice(0, 3), [
       { speaker: "caller", transcript: "Why Redis?", seq: 2 },
-      { generation: { id: "g1", state: "failed", reason: "disconnected" }, ai_reply: "[Erreur du modèle]", seq: 4 },
+      { generation: { id: "g1", kind: "answer", state: "failed", reason: "disconnected" }, ai_reply: "[Erreur du modèle]", seq: 4 },
       { resumed: { sessionId: session.id, seq: 4 } },
     ]);
     assert.equal(resumed.seq, 4);

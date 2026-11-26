@@ -18,11 +18,25 @@ The conversation page captures two distinct `audioinput` devices when system cap
 
 `src/pages/Conversation.jsx` only composes and renders the live workspace. Its logic lives in tested modules:
 
-- `src/services/conversationState.js` — pure reducer for status, transcript entries, the current (latest) interviewer question, pending/thinking guidance, streamed guidance keyed by generation ID (deltas append only for the current ID; the final reply replaces them; other IDs are ignored), stale-guidance hiding, terminal failure/budget states, pause, and dropped-audio counts. Incoming server messages pass through an ordered list of handlers.
-- `src/hooks/useInterviewSocket.js` — opens the socket from `window.callApi.getWsUrl()`, sends stored context on open (adding `capabilities: ["stream"]`), routes every socket event to one `dispatch`, applies audio backpressure, sends typed questions, and ends idempotently (also on unmount).
+- `src/services/conversationState.js` — pure reducer for status, transcript entries, the current (latest) interviewer question, pending/thinking guidance, streamed guidance keyed by generation ID (deltas append only for the current ID; the final reply replaces them; other IDs are ignored), stale-guidance hiding, terminal failure/budget states, pause, response-action state (the shown suggestion's `kind`, the completed generation an action may target, a pending action, and the last rejection), and dropped-audio counts. Incoming server messages pass through an ordered list of handlers. `canRequestResponseAction(state)` decides whether the response actions are available.
+- `src/hooks/useInterviewSocket.js` — opens the socket from `window.callApi.getWsUrl()`, sends stored context on open (adding `capabilities: ["stream", "resume"]`), routes every socket event to one `dispatch`, applies audio backpressure, sends typed questions and response actions, and ends idempotently (also on unmount).
+- `src/components/LiveGuidancePanel.jsx` — current question, plain-text suggestion (never HTML), the suggestion kind, response actions, relevant experience, and the typed-question fallback.
 - `src/hooks/useAudioCapture.js` — getUserMedia, AudioWorklet (or `ScriptProcessor` fallback) graph, meter levels, flush, and idempotent release of tracks and the `AudioContext`.
 - `src/services/audioCapture.js` and `src/services/interviewMessages.js` — pure capture helpers and client message encoders.
 - `src/components/TranscriptLog.jsx` — text-only transcript with near-bottom auto-scroll.
+
+### Response actions
+
+Under the suggested answer, four buttons ask the backend for a different take on the current suggestion ([protocol](protocols/websocket.md#response-actions)):
+
+| Button | Shortcut | Result |
+| --- | --- | --- |
+| Regenerate | Alt+R | A fresh answer to the same question. |
+| Shorter | Alt+S | The answer as at most three speakable sentences. |
+| More detail | Alt+E | Evidence-grounded STAR detail. |
+| Clarify | Alt+C | Clarifying questions to ask the interviewer. |
+
+The buttons apply only to a completed suggestion for a live question (not the introductory suggestion). They are disabled while a suggestion is being generated or an action is pending, while paused, while disconnected or reconnecting, after a failure, and once the interview budget is reached. Shortcuts use the physical key (`event.code`), so they work on layouts where Alt+letter types a character, and they are ignored while focus is in a text field (for example the typed-question box) or when Ctrl, Shift, or Meta is held. A badge names the kind of the shown suggestion ("Shorter answer", "Clarifying questions to ask", …). A rejected action (for example rate limited or no longer current) is explained in plain text below the buttons; a stale rejection disables the buttons until the next answer. Buttons show a visible focus ring (`.btn:focus-visible`).
 
 ## Platform audio adapter
 

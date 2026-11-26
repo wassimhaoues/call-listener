@@ -35,6 +35,13 @@ export function encodeInterviewerQuestionMessage(question) {
   return JSON.stringify({ interviewer_question: question });
 }
 
+// Candidate response actions on the current final suggestion.
+export const RESPONSE_ACTION_TYPES = Object.freeze(["regenerate", "shorten", "expand", "clarify"]);
+
+export function encodeResponseActionMessage(type, generationId) {
+  return JSON.stringify({ action: { type, generationId } });
+}
+
 // Must be the first frame on a reconnected socket.
 export function encodeResumeMessage(sessionId, lastSeq) {
   return JSON.stringify({ resume: { sessionId, lastSeq } });
