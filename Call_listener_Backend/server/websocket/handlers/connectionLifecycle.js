@@ -41,6 +41,7 @@ function sessionHooks(sessions, session) {
       }
     },
     onEnd: () => sessions.end(session),
+    beginEnd: () => sessions.beginEnd(session),
   };
 }
 

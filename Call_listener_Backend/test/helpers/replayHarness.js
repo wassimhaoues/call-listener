@@ -8,6 +8,7 @@ import { createAiReplyGenerator } from "../../server/services/ai/aiService.js";
 import { createInterviewBudget } from "../../server/services/ai/interviewBudget.js";
 import { buildPrompt } from "../../server/services/ai/promptBuilder.js";
 import { createInterviewWorkflow } from "../../server/services/interview/interviewWorkflow.js";
+import { createDebriefGenerator } from "../../server/services/interview/debrief.js";
 import { parseInterviewContext } from "../../server/contracts/interviewContext.js";
 import { createMemoryRedis } from "./memoryRedis.js";
 import { createFakeDeepgramClient } from "./fakeDeepgram.js";
@@ -95,12 +96,20 @@ export function createReplayHarness({
   // Likewise for the response-action interval; rate limits have unit tests.
   streamManager.ACTION_MIN_INTERVAL_MS = actionMinIntervalMs;
 
+  const generateDebrief = createDebriefGenerator({
+    ChatHistory,
+    ContextStore,
+    generateReply,
+    Budget,
+    log: silentLog,
+  });
   const handleMessage = createMessageHandler({
     ChatHistory,
     ContextStore,
     generateReply,
     buildPrompt,
     parseContext: parseInterviewContext,
+    generateDebrief,
     Budget,
     log: silentLog,
   });
@@ -179,7 +188,8 @@ export function createReplayHarness({
         await sendRaw(step.data);
         break;
       case "end":
-        await sendRaw(JSON.stringify({ end: true }));
+        // `debrief: true` ends the way "Stop and review" does.
+        await sendRaw(JSON.stringify({ end: step.debrief ? { debrief: true } : true }));
         break;
       default:
         throw new Error(`Unknown replay step type: ${step.type}`);

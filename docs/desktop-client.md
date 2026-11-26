@@ -19,11 +19,12 @@ The conversation page captures two distinct `audioinput` devices when system cap
 `src/pages/Conversation.jsx` only composes and renders the live workspace. Its logic lives in tested modules:
 
 - `src/services/conversationState.js` — pure reducer for status, transcript entries, the current (latest) interviewer question, pending/thinking guidance, streamed guidance keyed by generation ID (deltas append only for the current ID; the final reply replaces them; other IDs are ignored), stale-guidance hiding, terminal failure/budget states, pause, response-action state (the shown suggestion's `kind`, the completed generation an action may target, a pending action, and the last rejection), and dropped-audio counts. Incoming server messages pass through an ordered list of handlers. `canRequestResponseAction(state)` decides whether the response actions are available.
-- `src/hooks/useInterviewSocket.js` — opens the socket from `window.callApi.getWsUrl()`, sends stored context on open (adding `capabilities: ["stream", "resume"]`), routes every socket event to one `dispatch`, applies audio backpressure, sends typed questions and response actions, and ends idempotently (also on unmount).
+- `src/hooks/useInterviewSocket.js` — opens the socket from `window.callApi.getWsUrl()`, sends stored context on open (adding `capabilities: ["stream", "resume", "debrief"]`), routes every socket event to one `dispatch`, applies audio backpressure, sends typed questions and response actions, and ends idempotently (also on unmount). `endWithReview()` sends `{ end: { debrief: true } }`, stops reconnecting, and resolves with the `debrief` answer (or a failure when the socket closes or nothing arrives within 45 s) before closing the socket.
 - `src/components/LiveGuidancePanel.jsx` — current question, plain-text suggestion (never HTML), the suggestion kind, response actions, relevant experience, and the typed-question fallback.
 - `src/hooks/useAudioCapture.js` — getUserMedia, AudioWorklet (or `ScriptProcessor` fallback) graph, meter levels, flush, and idempotent release of tracks and the `AudioContext`.
 - `src/services/audioCapture.js` and `src/services/interviewMessages.js` — pure capture helpers and client message encoders.
 - `src/components/TranscriptLog.jsx` — text-only transcript with near-bottom auto-scroll.
+- `src/services/debriefState.js`, `src/services/debriefMarkdown.js`, `src/components/DebriefPanel.jsx` — the unsaved review (below).
 
 ### Response actions
 
@@ -37,6 +38,19 @@ Under the suggested answer, four buttons ask the backend for a different take on
 | Clarify | Alt+C | Clarifying questions to ask the interviewer. |
 
 The buttons apply only to a completed suggestion for a live question (not the introductory suggestion). They are disabled while a suggestion is being generated or an action is pending, while paused, while disconnected or reconnecting, after a failure, and once the interview budget is reached. Shortcuts use the physical key (`event.code`), so they work on layouts where Alt+letter types a character, and they are ignored while focus is in a text field (for example the typed-question box) or when Ctrl, Shift, or Meta is held. A badge names the kind of the shown suggestion ("Shorter answer", "Clarifying questions to ask", …). A rejected action (for example rate limited or no longer current) is explained in plain text below the buttons; a stale rejection disables the buttons until the next answer. Buttons show a visible focus ring (`.btn:focus-visible`).
+
+### Stop and review
+
+The top bar has **Pause**, **Stop and review**, and **Stop** (ordinary buttons, reachable with Tab and activated with Enter or Space). **Stop** behaves exactly as before. **Stop and review** follows the same order (flush the final audio batch, send it, end, release capture) but sends `{ "end": { "debrief": true } }` and keeps the socket open until the backend answers ([protocol](protocols/websocket.md#unsaved-debrief)). The live view is replaced by the review panel, which shows "Preparing your review…" and then either:
+
+- the review: questions covered (with what the candidate said and the evidence used, named by requirement), strengths, topics to improve, and an editable follow-up draft (a textarea; it is never sent anywhere), or
+- a plain-text explanation when the review was skipped (budget spent, nothing transcribed) or failed (including no answer within 45 s or a closed connection).
+
+Everything is rendered as text nodes, never HTML. `debriefState.js` is the pure reducer (`idle` → `preparing` → `ready`/`failed`/`skipped`; edits to the draft; discard) and bounds what the server sent.
+
+**Export as Markdown** builds the file in the renderer with the pure `buildDebriefMarkdown()` (all review text backslash-escaped so it stays literal Markdown; the draft goes in a fenced block) and saves it through a `Blob` and a temporary `<a download>` link, so Electron shows its save dialog. No IPC is involved. **Discard** (or **Cancel** while preparing, **Back to setup** after a failure) forgets the review and returns to setup.
+
+Nothing is stored: the review lives only in page state, never in localStorage or the main process, and the backend purges the session right after sending it. The panel says so, and the exported file is the only copy.
 
 ## Platform audio adapter
 
