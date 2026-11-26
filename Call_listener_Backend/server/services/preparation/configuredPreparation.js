@@ -11,7 +11,7 @@ import { createPreparationLimits } from "./preparationLimits.js";
  * unmetered requests. The candidate keeps the local brief.
  */
 export function createConfiguredPreparationBrief({ config, redisClient, log, ChatOpenRouterClass } = {}) {
-  if (!config || config.AI_PROVIDER !== "openrouter") return null;
+  if (config?.AI_PROVIDER !== "openrouter") return null;
   const allowed = new Set(config.OPENROUTER_ALLOWED_MODELS || []);
   const generateReply = createOpenRouterReplyGenerator({
     apiKey: config.OPENROUTER_API_KEY,

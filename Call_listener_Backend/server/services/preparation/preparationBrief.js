@@ -232,14 +232,18 @@ export function createPreparationBriefService({ generateReply, limits, isModelAl
       const onModel = ({ selected } = {}) => {
         if (typeof selected === "string") selectedModel = selected;
       };
-      let text = await callModel(deviceId, system, user, { model, signal, onModel });
+      const text = await callModel(deviceId, system, user, { model, signal, onModel });
       let parsed = parsePreparationBrief(text, allowedIds);
-      for (let attempt = 0; !parsed.ok && attempt < MAX_REPAIR_ATTEMPTS; attempt += 1) {
-        // A repair costs another request: only make it while budget remains.
-        if (signal?.aborted || !(await limits.canSpend(deviceId))) break;
+      // At most one repair (MAX_REPAIR_ATTEMPTS). It costs another request, so
+      // it is only made while budget remains and the client is still waiting.
+      if (!parsed.ok && !signal?.aborted && (await limits.canSpend(deviceId))) {
         log?.info?.("Preparation brief output invalid; making one repair attempt");
-        text = await callModel(deviceId, system, repairMessage(user, text, parsed.problem), { model, signal, onModel });
-        parsed = parsePreparationBrief(text, allowedIds);
+        const repaired = await callModel(deviceId, system, repairMessage(user, text, parsed.problem), {
+          model,
+          signal,
+          onModel,
+        });
+        parsed = parsePreparationBrief(repaired, allowedIds);
       }
       if (!parsed.ok) throw new PreparationError("preparation_failed", 502);
       // Metadata only: never log candidate, job, or brief text.

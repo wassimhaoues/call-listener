@@ -114,10 +114,10 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief 
       });
       res.set("Cache-Control", "no-store");
       return res.json(result);
-    } catch (failure) {
+    } catch (error_) {
       // Only typed preparation failures expose their code; anything else is a 502.
-      const typed = Number.isInteger(failure?.status) && typeof failure?.code === "string";
-      if (typed) return res.status(failure.status).json({ error: failure.code });
+      const typed = Number.isInteger(error_?.status) && typeof error_?.code === "string";
+      if (typed) return res.status(error_.status).json({ error: error_.code });
       return res.status(502).json({ error: "preparation_failed" });
     }
   });

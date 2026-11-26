@@ -351,7 +351,7 @@ export default function Context() {
               Improve with AI sends your approved profile, skills, achievements, and the job offer to the AI model.
               Pasted CV text is not sent. Nothing is sent until you click.
             </p>
-            {aiBrief.status === "loading" && <p role="status" className="text-sm mt-2">Generating your AI brief…</p>}
+            {aiBrief.status === "loading" && <output className="block text-sm mt-2">Generating your AI brief…</output>}
             {aiBrief.status === "error" && (
               <p role="alert" className="text-sm text-[var(--danger)] mt-2">{aiPreparationErrorMessage(aiBrief.error)}</p>
             )}
