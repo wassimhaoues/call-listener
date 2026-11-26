@@ -1,6 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import nodeFs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 
 const { createPlatformAudio } = require("../services/platformAudio/index.js");
@@ -12,97 +11,99 @@ const {
 const { AudioRouteManager } = require("../services/audio.js");
 const { getPlatformCapabilities } = require("../services/platformCapabilities.js");
 
-const SVV = "C:\\fake\\SoundVolumeView.exe";
-const USER_DATA = "C:\\fake\\userData";
-const SPEAKERS = "Realtek\\Device\\Speakers\\Render";
+const SVV = String.raw`C:\fake\SoundVolumeView.exe`;
+const SPEAKERS = String.raw`Realtek\Device\Speakers\Render`;
 
 const silentLogger = { log: vi.fn(), warn: vi.fn(), error: vi.fn() };
 
-// AudioRouteManager joins process.resourcesPath when looking for the
-// watchdog; Electron defines it, plain Node does not.
-const originalResourcesPath = process.resourcesPath;
-beforeAll(() => {
-  if (!process.resourcesPath) process.resourcesPath = os.tmpdir();
-});
-afterAll(() => {
-  process.resourcesPath = originalResourcesPath;
-});
+// The public AudioRouteManager methods the Windows adapter relies on. The
+// fake below must keep this exact surface so it cannot drift from the real one.
+const MANAGER_API = [
+  "isActive",
+  "detectVBCable",
+  "enable",
+  "disable",
+  "setDefault",
+  "gracefulExit",
+  "recoverIfDirty",
+  "pollForCable",
+  "offerInstall",
+];
 
-/** In-memory fs: only files written through it exist (so no watchdog spawn). */
-function makeFakeFs(initial = {}) {
-  const files = new Map(Object.entries(initial));
-  return {
-    files,
-    existsSync: (p) => files.has(p),
-    readFileSync: (p) => {
-      if (!files.has(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-      return files.get(p);
-    },
-    writeFileSync: (p, data) => files.set(p, String(data)),
-    unlinkSync: (p) => {
-      if (!files.delete(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-    },
-  };
-}
-
-/** Fake child_process that records SoundVolumeView calls instead of running them. */
-function makeFakeChildProcess(fakeFs, { cablePresent = true, failOn = null } = {}) {
+/**
+ * In-memory stand-in for AudioRouteManager. It records each OS-affecting call
+ * and models the same state rules: enable() saves the default device,
+ * gracefulExit() restores it only while active and always disables listening.
+ */
+function makeFakeManager({ cablePresent = true, failOn = null, dirty = false } = {}) {
   const calls = [];
-  const cp = {
+  const m = {
     calls,
     cablePresent,
-    exec: vi.fn((cmd, opts, cb) => {
-      calls.push(["exec", "/scomma"]);
-      const rows = ["Name,Device Name", "Speakers,Realtek"];
-      if (cp.cablePresent) rows.push("CABLE Output,VB-Audio Virtual Cable");
-      cb(null, rows.join("\n"));
-    }),
-    execFile: vi.fn((file, args, opts, cb) => {
-      calls.push(args);
-      if (failOn && args[0] === failOn) return cb(new Error(`${failOn} failed at ${SVV}`));
-      if (args[0] === "/scomma") {
-        fakeFs.writeFileSync(
-          args[1],
-          [
-            "Name,Default,Command-Line Friendly ID,Device Name",
-            `Speakers,Render,${SPEAKERS},Realtek`,
-          ].join("\n")
-        );
+    active: false,
+    pending: dirty ? { defaultDevice: SPEAKERS } : null,
+    _maybeFail(name) {
+      if (failOn === name) throw new Error(`${name} failed at ${SVV}`);
+    },
+    isActive: () => m.active,
+    async detectVBCable() {
+      calls.push("detectVBCable");
+      return m.cablePresent;
+    },
+    async enable() {
+      calls.push("enable");
+      m._maybeFail("enable");
+      m.pending = { defaultDevice: SPEAKERS };
+      m.active = true;
+    },
+    async disable() {
+      calls.push("disable");
+      m._maybeFail("disable");
+      m.pending = null;
+      m.active = false;
+    },
+    async setDefault(device) {
+      calls.push(`setDefault ${device}`);
+      m._maybeFail("setDefault");
+    },
+    async gracefulExit() {
+      calls.push("gracefulExit");
+      if (m.active && m.pending) await m.setDefault(m.pending.defaultDevice);
+      await m.disable().catch(() => {});
+    },
+    async recoverIfDirty() {
+      calls.push("recoverIfDirty");
+      if (m.pending) {
+        calls.push(`restore ${m.pending.defaultDevice}`);
+        m.pending = null;
       }
-      cb(null);
-    }),
-    spawn: vi.fn(() => {
-      throw new Error("spawn must not run in tests");
-    }),
+    },
+    pollForCable(onDetect, everyMs) {
+      const timer = setInterval(async () => {
+        if (await m.detectVBCable()) {
+          clearInterval(timer);
+          onDetect?.();
+        }
+      }, everyMs);
+    },
+    offerInstall: vi.fn(async () => true),
   };
-  return cp;
+  return m;
 }
 
-function makeWindows({ cablePresent = true, failOn = null, svvPath = SVV } = {}) {
-  const fakeFs = makeFakeFs({ [SVV]: "binary" });
-  const cp = makeFakeChildProcess(fakeFs, { cablePresent, failOn });
-  const createManager = vi.fn(
-    (resolved) =>
-      new AudioRouteManager({
-        svvPath: resolved,
-        vbCableInstaller: "",
-        userDataDir: USER_DATA,
-        logger: silentLogger,
-        childProcess: cp,
-        fs: fakeFs,
-      })
-  );
+function makeWindows({ svvPath = SVV, ...managerOpts } = {}) {
+  const manager = makeFakeManager(managerOpts);
+  const createManager = vi.fn(() => manager);
+  const fs = { existsSync: (p) => p === SVV };
   const adapter = createPlatformAudio({
     platform: "win32",
     capabilities: getPlatformCapabilities({ platform: "win32" }),
     logger: silentLogger,
-    fs: fakeFs,
+    fs,
     windows: { ensureTools: vi.fn(async () => svvPath), createManager },
   });
-  return { adapter, cp, fakeFs, createManager };
+  return { adapter, manager, createManager };
 }
-
-const svvCommands = (cp) => cp.calls.map((c) => c.join(" "));
 
 describe("createPlatformAudio adapter choice", () => {
   it("wraps VB-Cable routing on Windows", () => {
@@ -141,95 +142,94 @@ describe("createPlatformAudio adapter choice", () => {
 });
 
 describe("Windows adapter (AudioRouteManager behind the interface)", () => {
-  it("runs the same SoundVolumeView sequence as before on startup and exit", async () => {
-    const { adapter, cp } = makeWindows();
+  it("relies only on AudioRouteManager's existing public API", () => {
+    for (const method of MANAGER_API) {
+      expect(typeof AudioRouteManager.prototype[method]).toBe("function");
+    }
+  });
+
+  it("calls the manager in the same order as the old main.js startup and exit", async () => {
+    const { adapter, manager, createManager } = makeWindows();
 
     expect(await adapter.prepare()).toEqual({ ok: true });
+    expect(createManager).toHaveBeenCalledWith(SVV);
     expect(await adapter.ensureReady()).toEqual({ status: "ready" });
     expect(adapter.isRoutingActive()).toBe(true);
-    expect(svvCommands(cp)).toEqual([
-      "exec /scomma",
-      expect.stringMatching(/^\/scomma .*svv_\d+\.csv$/),
-      "/SetListenToThisDevice VB-Audio Virtual Cable 1",
-      `/SetPlaybackThroughDevice VB-Audio Virtual Cable ${SPEAKERS}`,
-      `/SetDefault ${CABLE_RENDER_DEVICE} all`,
+    expect(manager.calls).toEqual([
+      "recoverIfDirty",
+      "detectVBCable",
+      "enable",
+      `setDefault ${CABLE_RENDER_DEVICE}`,
     ]);
 
-    cp.calls.length = 0;
+    manager.calls.length = 0;
     await adapter.gracefulExit();
-    expect(svvCommands(cp)).toEqual([
-      `/SetDefault ${SPEAKERS} all`,
-      "/SetListenToThisDevice VB-Audio Virtual Cable 0",
-    ]);
+    expect(manager.calls).toEqual(["gracefulExit", `setDefault ${SPEAKERS}`, "disable"]);
     expect(adapter.isRoutingActive()).toBe(false);
     expect(adapter.describe().state).toBe("exited");
   });
 
   it("restores a dirty state left by a crash before enabling", async () => {
-    const { adapter, cp, fakeFs } = makeWindows();
-    fakeFs.writeFileSync(
-      path.join(USER_DATA, "audio_state.json"),
-      JSON.stringify({ pendingRestore: true, defaultDevice: SPEAKERS })
-    );
+    const { adapter, manager } = makeWindows({ dirty: true });
     await adapter.prepare();
     await adapter.ensureReady();
-    expect(svvCommands(cp).slice(0, 2)).toEqual([
-      `/SetDefault ${SPEAKERS} all`,
-      "/SetListenToThisDevice VB-Audio Virtual Cable 0",
+    expect(manager.calls.slice(0, 3)).toEqual([
+      "recoverIfDirty",
+      `restore ${SPEAKERS}`,
+      "detectVBCable",
     ]);
   });
 
   it("treats double enable, double disable, and double exit as no-ops", async () => {
-    const { adapter, cp } = makeWindows();
+    const { adapter, manager } = makeWindows();
     await adapter.prepare();
     await adapter.ensureReady();
-    cp.calls.length = 0;
+    manager.calls.length = 0;
 
     expect(await adapter.enableRouting()).toEqual({ changed: false, reason: "already-active" });
-    expect(cp.calls).toEqual([]);
+    expect(manager.calls).toEqual([]);
 
     expect(await adapter.disableRouting()).toEqual({ changed: true });
     expect(await adapter.disableRouting()).toEqual({ changed: false, reason: "already-inactive" });
-    expect(svvCommands(cp)).toEqual(["/SetListenToThisDevice VB-Audio Virtual Cable 0"]);
+    expect(manager.calls).toEqual(["disable"]);
 
-    cp.calls.length = 0;
+    manager.calls.length = 0;
     const [a, b] = [adapter.gracefulExit(), adapter.gracefulExit()];
     expect(a).toBe(b);
     await a;
     await adapter.gracefulExit();
-    // Inactive at exit: AudioRouteManager still disables listen exactly once.
-    expect(svvCommands(cp)).toEqual(["/SetListenToThisDevice VB-Audio Virtual Cable 0"]);
+    // Inactive at exit: AudioRouteManager.gracefulExit still runs exactly once.
+    expect(manager.calls).toEqual(["gracefulExit", "disable"]);
   });
 
   it("serializes concurrent enables so routing is applied once", async () => {
-    const { adapter, cp } = makeWindows();
+    const { adapter, manager } = makeWindows();
     await adapter.prepare();
     const results = await Promise.all([adapter.enableRouting(), adapter.enableRouting()]);
     expect(results).toEqual([{ changed: true }, { changed: false, reason: "already-active" }]);
-    expect(svvCommands(cp).filter((c) => c.includes("/SetListenToThisDevice"))).toEqual([
-      "/SetListenToThisDevice VB-Audio Virtual Cable 1",
-    ]);
+    expect(manager.calls).toEqual(["enable"]);
   });
 
   it("refuses to re-enable routing after exit (e.g. resume during quit)", async () => {
-    const { adapter, cp } = makeWindows();
+    const { adapter, manager } = makeWindows();
     await adapter.prepare();
     await adapter.gracefulExit();
-    cp.calls.length = 0;
+    manager.calls.length = 0;
     await adapter.onResume();
-    expect(cp.calls).toEqual([]);
+    expect(manager.calls).toEqual([]);
     expect(await adapter.enableRouting()).toEqual({ changed: false, reason: "exited" });
   });
 
   it("disables on suspend and re-enables on resume without throwing", async () => {
-    const { adapter, cp } = makeWindows();
+    const { adapter, manager } = makeWindows();
     await adapter.prepare();
     await adapter.ensureReady();
+    manager.calls.length = 0;
     await adapter.onSuspend();
     expect(adapter.isRoutingActive()).toBe(false);
     await adapter.onResume();
     expect(adapter.isRoutingActive()).toBe(true);
-    expect(svvCommands(cp)).toContain("/SetListenToThisDevice VB-Audio Virtual Cable 0");
+    expect(manager.calls).toEqual(["disable", "enable"]);
   });
 
   it("reports a missing SoundVolumeView without creating a manager", async () => {
@@ -243,7 +243,7 @@ describe("Windows adapter (AudioRouteManager behind the interface)", () => {
   });
 
   it("reports a missing VB-Cable and enters the app once polling finds it", async () => {
-    const { adapter, cp } = makeWindows({ cablePresent: false });
+    const { adapter, manager } = makeWindows({ cablePresent: false });
     await adapter.prepare();
     expect(await adapter.ensureReady()).toEqual({ status: "needs-device" });
     expect(adapter.describe()).toMatchObject({
@@ -251,23 +251,25 @@ describe("Windows adapter (AudioRouteManager behind the interface)", () => {
       lastErrorCode: "vb-cable-missing",
       routingActive: false,
     });
+    await adapter.offerDeviceInstall();
+    expect(manager.offerInstall).toHaveBeenCalledTimes(1);
 
-    cp.cablePresent = true;
+    manager.cablePresent = true;
     await new Promise((resolve) => adapter.waitForDevice(resolve, 5));
     expect(adapter.describe()).toMatchObject({ state: "ready", lastErrorCode: null, routingActive: true });
-    expect(svvCommands(cp)).toContain(`/SetDefault ${CABLE_RENDER_DEVICE} all`);
+    expect(manager.calls.slice(-2)).toEqual(["enable", `setDefault ${CABLE_RENDER_DEVICE}`]);
     await adapter.gracefulExit();
   });
 
   it("maps startup and toggle failures to codes without leaking raw messages", async () => {
-    const { adapter } = makeWindows({ failOn: "/SetListenToThisDevice" });
+    const { adapter } = makeWindows({ failOn: "enable" });
     await adapter.prepare();
     expect(await adapter.ensureReady()).toEqual({ status: "error" });
     const described = adapter.describe();
     expect(described).toMatchObject({ state: "error", lastErrorCode: "startup-failed" });
     expect(JSON.stringify(described)).not.toContain("fake");
 
-    await expect(adapter.enableRouting()).rejects.toThrow(/SetListenToThisDevice failed/);
+    await expect(adapter.enableRouting()).rejects.toThrow(/enable failed/);
     expect(adapter.describe().lastErrorCode).toBe("routing-failed");
     // Power hooks swallow the same failure.
     await expect(adapter.onResume()).resolves.toBeUndefined();

@@ -14,9 +14,9 @@ export default function Connecting() {
       <Card className="w-full max-w-md text-center">
         <CardHeader>Connecting…</CardHeader>
         <CardBody>
-          <p role="status" className="text-sm text-[var(--text-2)]">
+          <output className="block text-sm text-[var(--text-2)]">
             Signing in to the Call Listener server. This usually takes a moment.
-          </p>
+          </output>
         </CardBody>
       </Card>
     </div>

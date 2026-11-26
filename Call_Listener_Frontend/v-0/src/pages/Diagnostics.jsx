@@ -14,6 +14,13 @@ const DISPLAY_SERVER_LABELS = {
 
 const SEVERITY_LABELS = { error: "Error", warning: "Warning", info: "Note" };
 
+function describeOs(os) {
+  const family = os?.family ?? "Unknown";
+  const arch = os?.arch ? " (" + os.arch + ")" : "";
+  const support = os?.supported ? "" : " — unsupported";
+  return family + arch + support;
+}
+
 function Row({ label, value }) {
   return (
     <div className="flex justify-between gap-4 py-1.5 border-b border-subtle last:border-b-0">
@@ -81,7 +88,7 @@ export default function Diagnostics() {
               <dl>
                 <Row
                   label="Operating system"
-                  value={`${data.os?.family ?? "Unknown"}${data.os?.arch ? ` (${data.os.arch})` : ""}${data.os?.supported ? "" : " — unsupported"}`}
+                  value={describeOs(data.os)}
                 />
                 <Row
                   label="Display server"

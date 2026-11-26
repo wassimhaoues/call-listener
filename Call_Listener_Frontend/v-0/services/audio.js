@@ -1,20 +1,15 @@
 // services/audio.js
 const path = require("path");
 const os = require("os");
-const nodeFs = require("fs");
-const childProcess = require("child_process");
+const fs = require("fs");
+const { execFile, exec, spawn } = require("child_process");
 const { parseCsvLine } = require("../utils/csv.js");
 
 class AudioRouteManager {
   /**
-   * `childProcess` and `fs` are optional injection points for tests; they
-   * default to the real Node modules, so production behavior is unchanged.
-   *
-   * @param {{ svvPath:string, vbCableInstaller:string, userDataDir:string, logger:Console, childProcess?:object, fs?:object }} cfg
+   * @param {{ svvPath:string, vbCableInstaller:string, userDataDir:string, logger:Console }} cfg
    */
   constructor(cfg) {
-    this.cp = cfg.childProcess || childProcess;
-    this.fs = cfg.fs || nodeFs;
     this.svv = cfg.svvPath;
     this.vbCableInstaller = cfg.vbCableInstaller;
     this.userDataDir = cfg.userDataDir;
@@ -34,17 +29,17 @@ class AudioRouteManager {
 
   _readState() {
     try {
-      return JSON.parse(this.fs.readFileSync(this.statePath, "utf8"));
+      return JSON.parse(fs.readFileSync(this.statePath, "utf8"));
     } catch {
       return null;
     }
   }
   _writeState(obj) {
-    this.fs.writeFileSync(this.statePath, JSON.stringify(obj, null, 2));
+    fs.writeFileSync(this.statePath, JSON.stringify(obj, null, 2));
   }
   _rmState() {
     try {
-      this.fs.unlinkSync(this.statePath);
+      fs.unlinkSync(this.statePath);
     } catch {}
   }
 
@@ -52,7 +47,7 @@ class AudioRouteManager {
 
   async detectVBCable() {
     const stdout = await new Promise((resolve, reject) => {
-      this.cp.exec(`"${this.svv}" /scomma`, { windowsHide: true }, (err, out) => {
+      exec(`"${this.svv}" /scomma`, { windowsHide: true }, (err, out) => {
         if (err) return reject(err);
         resolve(out);
       });
@@ -82,17 +77,17 @@ class AudioRouteManager {
   async _getDefaultRenderCmdId() {
     const tmpFile = path.join(os.tmpdir(), `svv_${Date.now()}.csv`);
     await new Promise((resolve, reject) => {
-      this.cp.execFile(this.svv, ["/scomma", tmpFile], { windowsHide: true }, (err) =>
+      execFile(this.svv, ["/scomma", tmpFile], { windowsHide: true }, (err) =>
         err ? reject(err) : resolve()
       );
     });
 
     let data = "";
     try {
-      data = this.fs.readFileSync(tmpFile, "utf8");
+      data = fs.readFileSync(tmpFile, "utf8");
     } finally {
       try {
-        this.fs.unlinkSync(tmpFile);
+        fs.unlinkSync(tmpFile);
       } catch {}
     }
 
@@ -135,7 +130,7 @@ class AudioRouteManager {
 
     // listen on cable
     await new Promise((resolve, reject) => {
-      this.cp.execFile(
+      execFile(
         this.svv,
         ["/SetListenToThisDevice", "VB-Audio Virtual Cable", "1"],
         { windowsHide: true },
@@ -145,7 +140,7 @@ class AudioRouteManager {
 
     // route through default device
     await new Promise((resolve, reject) => {
-      this.cp.execFile(
+      execFile(
         this.svv,
         ["/SetPlaybackThroughDevice", "VB-Audio Virtual Cable", defaultCmdId],
         { windowsHide: true },
@@ -159,7 +154,7 @@ class AudioRouteManager {
 
   async disable() {
     await new Promise((resolve, reject) => {
-      this.cp.execFile(
+      execFile(
         this.svv,
         ["/SetListenToThisDevice", "VB-Audio Virtual Cable", "0"],
         { windowsHide: true },
@@ -173,7 +168,7 @@ class AudioRouteManager {
 
   async setDefault(deviceNameOrCmdId) {
     await new Promise((resolve, reject) => {
-      this.cp.execFile(
+      execFile(
         this.svv,
         ["/SetDefault", deviceNameOrCmdId, "all"],
         { windowsHide: true },
@@ -204,12 +199,12 @@ class AudioRouteManager {
     if (s?.pendingRestore && s.defaultDevice) {
       this.log.log("[audio] recovering from previous crash...");
       await new Promise((resolve) => {
-        this.cp.execFile(
+        execFile(
           this.svv,
           ["/SetDefault", s.defaultDevice, "all"],
           { windowsHide: true },
           () => {
-            this.cp.execFile(
+            execFile(
               this.svv,
               ["/SetListenToThisDevice", "VB-Audio Virtual Cable", "0"],
               { windowsHide: true },
@@ -260,7 +255,7 @@ class AudioRouteManager {
       /'/g,
       "''"
     )}' -Verb runAs`;
-    this.cp.exec(
+    exec(
       `powershell -NoProfile -Command "${ps}"`,
       { windowsHide: true },
       (err) => {
@@ -280,8 +275,8 @@ class AudioRouteManager {
       "watchdog.js"
     );
     const asar = path.join(__dirname, "..", "watchdog.js");
-    const watchdogPath = this.fs.existsSync(unpacked) ? unpacked : asar;
-    if (!this.fs.existsSync(watchdogPath)) {
+    const watchdogPath = fs.existsSync(unpacked) ? unpacked : asar;
+    if (!fs.existsSync(watchdogPath)) {
       this.log.warn("[audio] watchdog not found; skipping");
       return;
     }
@@ -291,7 +286,7 @@ class AudioRouteManager {
     const args = [watchdogPath, process.pid, defaultDevice, this.svv];
 
     try {
-      const child = this.cp.spawn(nodeExe, args, {
+      const child = spawn(nodeExe, args, {
         // Without this, a packaged Electron executable starts a second app
         // instance (which the single-instance lock quits) instead of running
         // watchdog.js, so crash restoration never happens.

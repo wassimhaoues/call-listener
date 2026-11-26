@@ -6,9 +6,9 @@
 //   - serialization of routing changes so suspend/resume/tray cannot overlap,
 //   - a memoized gracefulExit so double quit paths restore once,
 //   - error codes for the diagnostics page (raw messages stay in the log).
-const nodeFs = require("fs");
+const nodeFs = require("node:fs");
 
-const CABLE_RENDER_DEVICE = "VB-Audio Virtual Cable\\Device\\CABLE Input\\Render";
+const CABLE_RENDER_DEVICE = String.raw`VB-Audio Virtual Cable\Device\CABLE Input\Render`;
 const DEFAULT_POLL_MS = 3000;
 
 function createWindowsAudioAdapter({

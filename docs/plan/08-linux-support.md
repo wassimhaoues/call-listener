@@ -44,10 +44,10 @@ Exit gate: the shared candidate workspace opens on Linux without Windows-only de
 
 ### L1 — Platform adapter extraction
 
-- [x] Put the existing Windows route manager behind the shared interface without behavior changes. `services/platformAudio/windowsAdapter.js` wraps `AudioRouteManager`, whose public API is unchanged (it only gained optional `childProcess`/`fs` injection); tests assert the same SoundVolumeView command sequence for startup, crash recovery, and exit. Adapter-level additions: redundant enable/disable calls are skipped, routing changes are serialized, `gracefulExit()` runs once, and routing is never re-enabled after exit. Windows CI (install smoke, VB-Cable restoration) remains the regression gate.
+- [x] Put the existing Windows route manager behind the shared interface without behavior changes. `services/platformAudio/windowsAdapter.js` wraps `AudioRouteManager`, and `services/audio.js` itself is untouched; tests assert the adapter calls the manager in the same order the old `main.js` did for startup, crash recovery, polling, and exit. Adapter-level additions: redundant enable/disable calls are skipped, routing changes are serialized, `gracefulExit()` runs once, and routing is never re-enabled after exit. Windows CI (install smoke, VB-Cable restoration) remains the regression gate.
 - [x] Add a Linux adapter that owns only app-created streams. `services/platformAudio/linuxAdapter.js` runs no commands, changes no OS routing, stops only streams registered through `trackStream()`, and reports microphone-only capture until L2.
 - [x] Replace the `win32` block with capability-based routing. `main.js` startup, tray, `powerMonitor` suspend/resume, quit cleanup, and IPC call the adapter chosen by `createPlatformAudio()` from `getPlatformCapabilities()`. The only remaining `win32` check sets the Windows AppUserModelID (shell identity, not audio).
-- [x] Unit-test adapter choice, idempotent lifecycle, and errors without running platform commands (`test/platformAudio.test.js`, fake `child_process`/`fs`).
+- [x] Unit-test adapter choice, idempotent lifecycle, and errors without running platform commands (`test/platformAudio.test.js`, an injected fake manager with the `AudioRouteManager` public API, and injected `fs`/logger).
 
 Exit gate: Windows regressions pass and Linux completes microphone-only mode.
 

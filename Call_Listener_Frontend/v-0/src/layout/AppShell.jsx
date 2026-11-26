@@ -4,6 +4,17 @@ import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useUI } from "@/ui/UIContext.jsx";
 import { Activity, Moon, Sun } from "lucide-react";
 
+const ROUTE_TITLES = {
+  "/": "Setup",
+  "/context": "Call Context",
+  "/conversation": "Live Conversation",
+  "/novbcable": "Audio Device Check",
+  "/autherror": "Authentication",
+  "/unsupported": "Unsupported OS",
+  "/diagnostics": "Diagnostics",
+  "/connecting": "Connecting",
+};
+
 export default function AppShell() {
   const { title, actions, toggleTheme, theme, setTitle, setActions } = useUI();
   const { pathname } = useLocation();
@@ -11,24 +22,7 @@ export default function AppShell() {
 
   // Default title per route (pages can override in useEffect)
   useEffect(() => {
-    const routeTitle =
-      pathname === "/"
-        ? "Setup"
-        : pathname === "/context"
-        ? "Call Context"
-        : pathname === "/conversation"
-        ? "Live Conversation"
-        : pathname === "/novbcable"
-        ? "Audio Device Check"
-        : pathname === "/autherror"
-        ? "Authentication"
-        : pathname === "/unsupported"
-        ? "Unsupported OS"
-        : pathname === "/diagnostics"
-        ? "Diagnostics"
-        : pathname === "/connecting"
-        ? "Connecting"
-        : "Call Listener";
+    const routeTitle = ROUTE_TITLES[pathname] || "Call Listener";
     setTitle(routeTitle);
     if (pathname !== "/conversation") setActions(null);
   }, [pathname, setTitle, setActions]);
