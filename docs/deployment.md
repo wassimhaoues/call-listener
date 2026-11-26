@@ -24,6 +24,23 @@ Traefik routes `https://call.coworky.org` to Express on port 3000 and `wss://cal
 - Rotate `JWT_SECRET`, provider keys, and Redis credentials through the secret store; never put their values in documentation or source control.
 - Verify that the desktop `CALL_HOST`, backend `APP_ID`, and proxy hostname agree before releasing a desktop build.
 
+## Revoking an installation
+
+To cut off one installation (abuse, a lost laptop, a leaked token), add its device ID to the deny-list. Get the ID from the candidate: it is the UUID in the desktop's user-data `installation-id` file. Revocation logs and CLI output name a device only by a 12-character fingerprint of its hash.
+
+Run the CLI where `REDIS_URL` is set: inside the backend container, which already has it, or from `Call_listener_Backend/` with a local `.env`:
+
+```bash
+docker compose -f call-listener-stack.yml exec backend npm run admin:revocation -- check <device-id>
+npm run admin:revocation -- revoke <device-id> --reason "ticket 142"
+npm run admin:revocation -- check <device-id>
+npm run admin:revocation -- restore <device-id>
+```
+
+The reason is an operator code (at most 120 characters of letters, digits, spaces and `_ . : # / -`); never put names, emails, or other personal data in it. Exit codes: `0` success, `1` Redis failure (the message shows only an error code, never `REDIS_URL`), `2` invalid arguments. The device ID appears in your shell history, so run the command in a session whose history you do not keep or share.
+
+After `revoke`, new tokens, tickets, HTTP requests and WebSocket connections from that installation are refused immediately (`403`/`4003 device_revoked`), and its open sockets close within `REVOCATION_SWEEP_MS` (default one minute) on every backend instance. `restore` re-enables it at once. Limits: until installations are enrolled with revocable credentials, a user can reset the desktop's installation ID and come back as a new device; `REVOCATION_FAIL_CLOSED` (default `false`) decides whether a Redis outage lets requests through (logged) or refuses all new authentication (see [Device revocation](backend.md#device-revocation)). Redis persistence (`redis-data`) keeps the deny-list across restarts; restoring Redis from an old backup can drop recent revocations.
+
 ## Desktop release builds
 
 `.github/workflows/release.yml` builds desktop artifacts when a `vX.Y.Z` tag is pushed (or via manual dispatch with an existing tag):

@@ -7,13 +7,13 @@ The backend is an ES-module Node service in `Call_listener_Backend/server/`. `se
 | Method and path | Purpose |
 | --- | --- |
 | `GET /health` | Returns service and Redis client status. |
-| `POST /auth/token` | Accepts `{ "app_id", "device_id" }`; validates both, returns `{ "token", "expires_in" }`, and sets the `call_token` secure cookie. |
-| `GET /auth/me` | Validates `call_token` and returns its JWT claims. |
-| `POST /ws-ticket` | Requires a valid `call_token` cookie. Returns `{ "ticket", "expires_in" }` (`Cache-Control: no-store`): a short-lived, single-use WebSocket ticket bound to the cookie's `app_id` and `device_id`; see [Authentication](#authentication). |
+| `POST /auth/token` | Accepts `{ "app_id", "device_id" }` (`device_id` 6–256 characters); validates both, returns `{ "token", "expires_in" }`, and sets the `call_token` secure cookie. A revoked installation gets `403 { "error": "device_revoked" }`; see [Device revocation](#device-revocation). |
+| `GET /auth/me` | Validates `call_token` and returns its JWT claims (`403 device_revoked` for a revoked installation). |
+| `POST /ws-ticket` | Requires a valid `call_token` cookie of an installation that is not revoked (`403 device_revoked`). Returns `{ "ticket", "expires_in" }` (`Cache-Control: no-store`): a short-lived, single-use WebSocket ticket bound to the cookie's `app_id` and `device_id`; see [Authentication](#authentication). |
 | `GET /models` | Requires a valid `call_token` cookie. Returns the allowlisted model catalog `{ provider, defaultModel, source, fetchedAt, models: [{ id, name, contextLength, pricing, availability, isDefault }] }`. |
 | `POST /preparation/brief` | Requires a valid `call_token` cookie. Generates a model-backed preparation brief from `{ context, model?, language? }`; see [Preparation brief](#preparation-brief). |
 
-Malformed JSON bodies get `400 { "error": "invalid_json" }` and oversized bodies `413 { "error": "payload_too_large" }`.
+Malformed JSON bodies get `400 { "error": "invalid_json" }` and oversized bodies `413 { "error": "payload_too_large" }`. Every cookie-authenticated route (`/auth/me`, `/ws-ticket`, `/models`, `/preparation/brief`) also refuses a revoked installation with `403 device_revoked`.
 
 ## Preparation brief
 
@@ -111,6 +111,16 @@ The long-lived JWT no longer has to authenticate the socket. Code: `services/aut
 - **Compatibility flag.** With `WS_ALLOW_COOKIE_AUTH=true` (the default) a connection without a ticket is still authenticated by `?token=` or the `call_token` cookie, which verifies audience, issuer, application ID, and device ID as before (no credential → `4001 auth_required`, invalid → `4001 auth_failed`). With `false`, only tickets are accepted and any other connection closes with `4001 auth_required`.
 - **Turning cookie auth off.** Desktop builds that request tickets fall back to the cookie only when the server has no ticket route. Once every supported desktop release requests tickets (and the updater has rolled it out), set `WS_ALLOW_COOKIE_AUTH=false` in the deployment, then remove the cookie/`?token=` path from the socket in a later release.
 - **Logging.** Tickets and tokens are never logged; failures log only a fixed reason or an error code.
+
+### Device revocation
+
+An operator deny-list that cuts off one installation (`device_id`, the desktop's persisted random installation ID). It is not enrollment: until installations are enrolled with revocable credentials (roadmap Phase 1), a user who deletes the desktop's `installation-id` file gets a new, unrevoked ID. Code: `services/auth/deviceRevocation.js`, created once in `index.js` and injected into `createApp({ deviceRevocation })` and `startWebSocketServer({ deviceRevocation })`; operator CLI `scripts/admin/deviceRevocation.js` (see [Deployment](deployment.md#revoking-an-installation)).
+
+- **Storage.** `revoked:<sha256(device_id) hex>` → `{ "reason", "revoked_at" }`, no expiry; Redis never holds the raw device ID. The reason is a bounded operator code (at most 120 characters of letters, digits, spaces and `_ . : # / -`, default `operator`), so it cannot carry an email address or free text. Output and logs name a device only by its 12-character hash fingerprint.
+- **Enforcement.** `POST /auth/token` checks after validating the body and before signing (`403 device_revoked`, no cookie set). `POST /ws-ticket` checks after cookie verification and before the per-installation limiter (`403 device_revoked`, no ticket stored). `GET /auth/me`, `GET /models` and `POST /preparation/brief` refuse a still-valid JWT of a revoked installation with `403 device_revoked`. The WebSocket handshake checks the resolved owner on both the ticket and the cookie/`?token=` paths and closes with `4003 device_revoked`, so a ticket issued before the revocation is refused too, and so is a `resume` reconnect.
+- **Open sockets.** Each WebSocket server re-checks the installations of its open sockets every `REVOCATION_SWEEP_MS` (default 60000, 1000–3600000; one Redis `GET` per distinct installation per sweep) and closes a revoked installation's sockets with `4003 device_revoked`. Every instance reads the shared Redis deny-list, so a revocation reaches all instances; the delay is at most one sweep interval. A sweep never closes a socket because Redis is unreachable (in either failure mode), so a Redis outage does not cut live interviews.
+- **Redis failures.** Lookups time out after 1 s. With `REVOCATION_FAIL_CLOSED=false` (the default) a failed lookup allows the request and logs a warning with the error code (fail-open: Redis already gates tickets, so availability wins and a revoked device can slip through only while Redis is down). With `true`, HTTP answers `503 { "error": "revocation_unavailable" }` and the socket closes with `1011 auth_unavailable` (fail-closed: no revoked device ever authenticates, but a Redis outage refuses new tokens for every installation).
+- **Restore.** Deleting the key restores access immediately; existing JWTs that have not expired work again.
 
 ## Integrations and data
 
