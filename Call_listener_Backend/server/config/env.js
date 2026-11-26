@@ -29,6 +29,10 @@ const CONFIG = {
   MAX_INTERVIEW_COST_USD: Number(process.env.MAX_INTERVIEW_COST_USD || 5),
   OPENROUTER_INPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_INPUT_USD_PER_MILLION_TOKENS || 0.2),
   OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS || 1.2),
+  PREPARATION_DAILY_BUDGET_USD: Number(process.env.PREPARATION_DAILY_BUDGET_USD || 0.5),
+  PREPARATION_MAX_OUTPUT_TOKENS: Number(process.env.PREPARATION_MAX_OUTPUT_TOKENS || 2_000),
+  PREPARATION_REQUEST_TIMEOUT_MS: Number(process.env.PREPARATION_REQUEST_TIMEOUT_MS || 20_000),
+  PREPARATION_RATE_LIMIT_PER_MINUTE: Number(process.env.PREPARATION_RATE_LIMIT_PER_MINUTE || 3),
   COOKIE_SECURE: process.env.COOKIE_SECURE
     ? process.env.COOKIE_SECURE === "true"
     : !isDevelopment,
@@ -54,9 +58,20 @@ for (const key of [
   "MAX_INTERVIEW_COST_USD",
   "OPENROUTER_INPUT_USD_PER_MILLION_TOKENS",
   "OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS",
+  "PREPARATION_DAILY_BUDGET_USD",
 ]) {
   if (!Number.isFinite(CONFIG[key]) || CONFIG[key] < 0) {
     throw new Error(`${key} must be a non-negative number`);
+  }
+}
+
+for (const key of [
+  "PREPARATION_MAX_OUTPUT_TOKENS",
+  "PREPARATION_REQUEST_TIMEOUT_MS",
+  "PREPARATION_RATE_LIMIT_PER_MINUTE",
+]) {
+  if (!Number.isInteger(CONFIG[key]) || CONFIG[key] < 1) {
+    throw new Error(`${key} must be a positive integer`);
   }
 }
 

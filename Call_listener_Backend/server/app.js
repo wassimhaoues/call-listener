@@ -8,11 +8,15 @@ import cookieParser from "cookie-parser";
  * Keeping dependencies at this boundary makes the API testable without opening
  * a Redis connection or loading deployment credentials.
  */
-export function createApp({ redisClient, config, modelCatalog } = {}) {
+export const PREPARATION_BODY_LIMIT = "256kb";
+
+export function createApp({ redisClient, config, modelCatalog, preparationBrief } = {}) {
   if (!redisClient) throw new TypeError("redisClient is required");
   if (!config) throw new TypeError("config is required");
 
   const app = express();
+  // Candidate contexts can exceed the 100 kB default; only this route gets more.
+  app.use("/preparation", express.json({ limit: PREPARATION_BODY_LIMIT }));
   app.use(express.json());
   app.use(cookieParser());
   app.get("/health", async (_req, res) => {
@@ -93,6 +97,35 @@ export function createApp({ redisClient, config, modelCatalog } = {}) {
     } catch {
       return res.status(503).json({ error: "model_catalog_unavailable" });
     }
+  });
+  app.post("/preparation/brief", async (req, res) => {
+    const { claims, error } = verifyCookie(req);
+    if (error) return res.status(401).json({ error });
+    if (!preparationBrief) return res.status(501).json({ error: "preparation_unavailable" });
+    // Stop paying for a brief nobody is waiting for.
+    const controller = new AbortController();
+    res.on("close", () => {
+      if (!res.writableFinished) controller.abort(new Error("client_closed"));
+    });
+    try {
+      const result = await preparationBrief.generate(req.body, {
+        deviceId: claims.device_id,
+        signal: controller.signal,
+      });
+      res.set("Cache-Control", "no-store");
+      return res.json(result);
+    } catch (failure) {
+      // Only typed preparation failures expose their code; anything else is a 502.
+      const typed = Number.isInteger(failure?.status) && typeof failure?.code === "string";
+      if (typed) return res.status(failure.status).json({ error: failure.code });
+      return res.status(502).json({ error: "preparation_failed" });
+    }
+  });
+  // Malformed or oversized JSON bodies get a stable JSON error, not HTML.
+  app.use((err, _req, res, next) => {
+    if (err?.type === "entity.too.large") return res.status(413).json({ error: "payload_too_large" });
+    if (err?.type === "entity.parse.failed") return res.status(400).json({ error: "invalid_json" });
+    return next(err);
   });
   return app;
 }

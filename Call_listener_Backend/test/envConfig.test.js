@@ -74,3 +74,37 @@ test("OpenRouter configuration does not require a Groq key", async () => {
 
   assert.equal(stdout, "openrouter");
 });
+
+const PREPARATION_KEYS = [
+  "PREPARATION_DAILY_BUDGET_USD",
+  "PREPARATION_MAX_OUTPUT_TOKENS",
+  "PREPARATION_REQUEST_TIMEOUT_MS",
+  "PREPARATION_RATE_LIMIT_PER_MINUTE",
+];
+
+function loadPreparationConfig(env) {
+  return execFileAsync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import { CONFIG } from ${JSON.stringify(envModuleUrl)}; process.stdout.write(JSON.stringify(${JSON.stringify(PREPARATION_KEYS)}.map((key) => CONFIG[key])));`,
+    ],
+    { cwd: os.tmpdir(), env: { ...baseEnv, ...env } }
+  );
+}
+
+test("preparation limits have bounded defaults and reject invalid values", async () => {
+  const defaults = await loadPreparationConfig({});
+  assert.deepEqual(JSON.parse(defaults.stdout), [0.5, 2000, 20000, 3]);
+  const configured = await loadPreparationConfig({
+    PREPARATION_DAILY_BUDGET_USD: "0",
+    PREPARATION_RATE_LIMIT_PER_MINUTE: "5",
+  });
+  assert.deepEqual(JSON.parse(configured.stdout), [0, 2000, 20000, 5]);
+  await assert.rejects(loadPreparationConfig({ PREPARATION_DAILY_BUDGET_USD: "-1" }), /PREPARATION_DAILY_BUDGET_USD/);
+  await assert.rejects(
+    loadPreparationConfig({ PREPARATION_RATE_LIMIT_PER_MINUTE: "1.5" }),
+    /PREPARATION_RATE_LIMIT_PER_MINUTE/
+  );
+});
