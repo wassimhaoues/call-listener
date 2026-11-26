@@ -22,6 +22,7 @@ Use OpenRouter for selectable language models, LangChain for model integration a
 9. [Implementation status](STATUS.md)
 10. [Backend fixtures and session replay](fixtures.md)
 11. [Offline evaluation of live suggestions](evaluation.md)
+12. [Provider retries and request idempotency](provider-retries.md)
 
 ## Delivery sequence
 
