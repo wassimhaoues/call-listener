@@ -1,5 +1,11 @@
 import { loggers } from "../../core/logger/index.js";
 import { isInterviewerQuestion } from "../interview/questionClassifier.js";
+import { ACTION_REJECTION } from "../../contracts/candidateAction.js";
+
+// Response actions rewrite the latest answer; clarify produces questions for
+// the interviewer instead, so it never becomes the answer later actions use.
+const ANSWER_KINDS = new Set(["answer", "regenerate", "shorten", "expand"]);
+const TRANSFORM_KINDS = new Set(["shorten", "expand"]);
 
 function withTimeout(operation, ms, controller, label = "operation") {
   return new Promise((resolve, reject) => {
@@ -52,8 +58,13 @@ export class StreamManager {
     this.ContextStore = ContextStore;
     this.generateReply = generateReply;
     this.buildPrompt = buildPrompt;
-    this.runInterviewWorkflow = runInterviewWorkflow || (async ({ context, history, signal, model, onModel, onUsage, onToken }) =>
-      this.generateReply(this.buildPrompt(context, "reply"), history, { signal, model, onModel, onUsage, onToken }));
+    this.runInterviewWorkflow = runInterviewWorkflow || (async ({
+      context, history, signal, model, onModel, onUsage, onToken, mode = "reply", question, previousAnswer,
+    }) => this.generateReply(
+      this.buildPrompt(context, mode, undefined, { question, previousAnswer }),
+      history,
+      { signal, model, onModel, onUsage, onToken }
+    ));
     this.Budget = Budget;
     this.log = log;
     this.streams = {};
@@ -74,18 +85,35 @@ export class StreamManager {
     this.pendingQuestion = null;
     this.replyTimer = null;
     this.questionVersion = 0;
+    // Bumped by every queued request (a question or a response action); a
+    // generation is current only while no newer request exists.
+    this.requestVersion = 0;
+    // The question response actions apply to, and its latest final answer.
+    this.currentQuestion = { version: 0, text: "", answerText: null, actionCount: 0 };
+    // { id, kind, questionVersion, state } of the newest generation that
+    // reached the client; response actions must name its ID.
+    this.latestGeneration = null;
+    // Response-action cost bounds: a minimum interval between accepted
+    // actions and a cap per interviewer question.
+    this.ACTION_MIN_INTERVAL_MS = 1_500;
+    this.MAX_ACTIONS_PER_QUESTION = 5;
+    this.lastActionAt = Number.NEGATIVE_INFINITY;
+    this.now = Date.now;
     this.REPLY_COOLDOWN_MS = 800;
     this.AI_TIMEOUT_MS = 12_000;
     // Streaming is opt-in per client (see setClientCapabilities). Deltas are
     // coalesced and sent at most once per STREAM_FLUSH_MS.
     this.streamingEnabled = false;
+    // `actions` capability: generation IDs and kinds without streaming.
+    this.generationIdsRequested = false;
     this.STREAM_FLUSH_MS = 50;
     this.generationSequence = 0;
   }
 
   /** Apply the capabilities advertised by the latest accepted context. */
-  setClientCapabilities({ stream = false } = {}) {
+  setClientCapabilities({ stream = false, actions = false } = {}) {
     this.streamingEnabled = stream === true;
+    this.generationIdsRequested = actions === true;
   }
 
   sendToClient(payload, label = "message") {
@@ -201,18 +229,76 @@ export class StreamManager {
       this.log.debug(`Skipping non-question interviewer turn [${this.sessionId}]`);
       return true;
     }
-    this.queueQuestion(eventGeneration);
+    this.queueQuestion(eventGeneration, text);
     return true;
   }
 
-  queueQuestion(sessionGeneration) {
+  queueQuestion(sessionGeneration, text = "") {
     if (this.closed) return;
     this.questionVersion += 1;
-    this.pendingQuestion = { sessionGeneration, questionVersion: this.questionVersion };
+    this.currentQuestion = { version: this.questionVersion, text, answerText: null, actionCount: 0 };
+    this.enqueueRequest({ sessionGeneration, questionVersion: this.questionVersion, kind: "answer" });
+  }
+
+  /**
+   * Latest request wins: a newer question or response action replaces any
+   * queued one and aborts the generation in flight.
+   */
+  enqueueRequest(request) {
+    this.requestVersion += 1;
+    this.pendingQuestion = { ...request, requestVersion: this.requestVersion };
     if (this.isResponding) {
-      this.activeGenerationController?.abort(new Error("superseded by newer interviewer question"));
+      this.activeGenerationController?.abort(new Error("superseded by a newer request"));
     }
     this.scheduleReply();
+  }
+
+  /** Why `action` cannot run now, or null when it can. */
+  actionRejection(action) {
+    const latest = this.latestGeneration;
+    const question = this.currentQuestion;
+    if (latest?.id !== action.generationId || latest.questionVersion !== question.version) {
+      return ACTION_REJECTION.STALE_GENERATION;
+    }
+    if (TRANSFORM_KINDS.has(action.type) && !question.answerText) {
+      return ACTION_REJECTION.NO_FINAL_ANSWER;
+    }
+    if (question.actionCount >= this.MAX_ACTIONS_PER_QUESTION) {
+      return ACTION_REJECTION.QUESTION_LIMIT_REACHED;
+    }
+    if (this.now() - this.lastActionAt < this.ACTION_MIN_INTERVAL_MS) {
+      return ACTION_REJECTION.RATE_LIMITED;
+    }
+    return null;
+  }
+
+  /**
+   * Run a validated candidate response action (`{ type, generationId }`) as a
+   * new generation for the current question. Returns null when it was
+   * queued (or ignored after end), otherwise the error payload to send.
+   */
+  async requestAction(action, wsClient) {
+    if (this.closed) return null;
+    if (wsClient) this.wsClient = wsClient;
+    if (this.Budget && !(await this.Budget.canGenerate(this.sessionId)).allowed) {
+      return { error: "interview_budget_reached" };
+    }
+    if (this.closed) return null;
+    const reason = this.actionRejection(action);
+    if (reason) return { error: "action_rejected", reason };
+    const question = this.currentQuestion;
+    question.actionCount += 1;
+    this.lastActionAt = this.now();
+    this.enqueueRequest({
+      sessionGeneration: this.generation,
+      questionVersion: question.version,
+      kind: action.type,
+      question: question.text,
+      // Transforms work on the latest final answer; it reaches the model as
+      // quoted data, never as instructions.
+      previousAnswer: TRANSFORM_KINDS.has(action.type) ? question.answerText : undefined,
+    });
+    return null;
   }
 
   scheduleReply() {
@@ -230,7 +316,14 @@ export class StreamManager {
     void this.generateSuggestion(question);
   }
 
-  async generateSuggestion({ sessionGeneration, questionVersion }) {
+  async generateSuggestion({
+    sessionGeneration,
+    questionVersion,
+    requestVersion,
+    kind = "answer",
+    question,
+    previousAnswer,
+  }) {
     this.isResponding = true;
     const generationController = new AbortController();
     this.activeGenerationController = generationController;
@@ -239,21 +332,24 @@ export class StreamManager {
     const generationId = `g${this.generationSequence}`;
     // Pinned per generation: a capability change applies to the next one.
     const streaming = this.streamingEnabled;
-    const activeGeneration = { id: generationId, streaming };
+    // IDs and kinds go to streaming clients and to `actions` clients.
+    const identity = (streaming || this.generationIdsRequested)
+      ? { id: generationId, kind }
+      : undefined;
+    const tag = (state) => ({ ...identity, state });
+    const activeGeneration = { id: generationId, identity };
     this.activeGeneration = activeGeneration;
+    const generationRecord = { id: generationId, kind, questionVersion, state: "running" };
     const isCurrent = () =>
       !this.closed &&
       !generationController.signal.aborted &&
       sessionGeneration === this.generation &&
-      questionVersion === this.questionVersion;
+      requestVersion === this.requestVersion;
     const deltas = streaming
       ? createDeltaBatcher({
         flushMs: this.STREAM_FLUSH_MS,
         isCurrent,
-        send: (delta) => this.sendToClient(
-          { generation: { id: generationId, state: "streaming" }, delta },
-          "delta"
-        ),
+        send: (delta) => this.sendToClient({ generation: tag("streaming"), delta }, "delta"),
       })
       : null;
     try {
@@ -271,15 +367,16 @@ export class StreamManager {
       const selectedModel = contextObj?.settings?.model;
       let modelInfo = null;
       const historyStr = await this.ChatHistory.toPrompt(this.sessionId);
-      if (this.wsClient?.readyState === this.wsClient.OPEN) {
-        this.wsClient.send(JSON.stringify({
-          generation: streaming ? { id: generationId, state: "thinking" } : { state: "thinking" },
-        }));
-      }
+      if (!isCurrent()) return;
+      this.latestGeneration = generationRecord;
+      this.sendToClient({ generation: tag("thinking") }, "thinking");
       const aiText = await withTimeout(
         this.runInterviewWorkflow({
           context: contextStr,
           history: historyStr,
+          mode: kind === "answer" ? "reply" : kind,
+          question,
+          previousAnswer,
           signal: generationController.signal,
           onUsage: (usage, estimateBasis) => this.Budget?.recordUsage(this.sessionId, usage, estimateBasis),
           model: selectedModel,
@@ -291,29 +388,33 @@ export class StreamManager {
         "generateReply"
       );
       const finalText = (aiText || "").trim();
-      if (
-        this.closed ||
-        sessionGeneration !== this.generation ||
-        questionVersion !== this.questionVersion
-      ) return;
+      const isLatestRequest = () =>
+        !this.closed &&
+        sessionGeneration === this.generation &&
+        requestVersion === this.requestVersion;
+      if (!isLatestRequest()) return;
       if (!finalText) {
         deltas?.cancel();
-        sendGenerationFailure(this.wsClient, streaming ? generationId : undefined);
+        generationRecord.state = "failed";
+        sendGenerationFailure(this.wsClient, identity);
         return;
       }
-      await this.ChatHistory.push(this.sessionId, "assistant", finalText);
-      if (this.closed || sessionGeneration !== this.generation || questionVersion !== this.questionVersion) return;
+      // Only interview answers join the conversation history; action outputs
+      // are alternative renderings of guidance the candidate asked for.
+      if (kind === "answer") await this.ChatHistory.push(this.sessionId, "assistant", finalText);
+      if (!isLatestRequest()) return;
       // Deliver any coalesced tail before the terminal message so deltas are
       // never reordered after `done`.
       deltas?.flush();
       deltas?.cancel();
+      generationRecord.state = "done";
+      if (ANSWER_KINDS.has(kind) && this.currentQuestion.version === questionVersion) {
+        this.currentQuestion.answerText = finalText;
+      }
       const reply = modelInfo ? { ai_reply: finalText, model: modelInfo } : { ai_reply: finalText };
-      this.sendToClient(
-        streaming ? { ...reply, generation: { id: generationId, state: "done" } } : reply,
-        "reply"
-      );
+      this.sendToClient(identity ? { ...reply, generation: tag("done") } : reply, "reply");
     } catch (error) {
-      const superseded = generationController.signal.aborted && questionVersion !== this.questionVersion;
+      const superseded = generationController.signal.aborted && requestVersion !== this.requestVersion;
       if (!superseded) {
         this.log.error(`❌ AI pipeline failure [${this.sessionId}]: %o`, error);
       }
@@ -321,8 +422,11 @@ export class StreamManager {
         !superseded &&
         !this.closed &&
         sessionGeneration === this.generation &&
-        questionVersion === this.questionVersion
-      ) sendGenerationFailure(this.wsClient, streaming ? generationId : undefined);
+        requestVersion === this.requestVersion
+      ) {
+        generationRecord.state = "failed";
+        sendGenerationFailure(this.wsClient, identity);
+      }
     } finally {
       // Terminal for this generation: drop any buffered tail and its timer.
       deltas?.cancel();
@@ -406,14 +510,17 @@ export class StreamManager {
   async pause() {
     if (this.closed) return;
     const interrupted = this.activeGeneration;
+    const queuedAction = this.pendingQuestion && this.pendingQuestion.kind !== "answer";
     this.activeGeneration = null;
     this.cancelPendingWork("client disconnected");
     if (interrupted) {
-      sendGenerationFailure(
-        this.wsClient,
-        interrupted.streaming ? interrupted.id : undefined,
-        "disconnected"
-      );
+      if (this.latestGeneration?.id === interrupted.id) this.latestGeneration.state = "failed";
+      sendGenerationFailure(this.wsClient, interrupted.identity, "disconnected");
+    }
+    // A response action still waiting for its turn never started: report it
+    // so the client stops waiting for it. It is never run later.
+    if (queuedAction) {
+      this.sendToClient({ error: "action_rejected", reason: "disconnected" }, "action rejection");
     }
     this.log.info(`⏸️ Pausing Deepgram streams for session [${this.sessionId}]`);
     await this.stopStreams();
@@ -500,17 +607,18 @@ export function createDeltaBatcher({ flushMs, isCurrent, send }) {
   };
 }
 
-function failedGeneration(generationId, reason) {
-  const generation = generationId ? { id: generationId, state: "failed" } : { state: "failed" };
+function failedGeneration(identity, reason) {
+  const generation = { ...identity, state: "failed" };
   if (reason) generation.reason = reason;
   return generation;
 }
 
-function sendGenerationFailure(wsClient, generationId, reason) {
+/** `identity` is `{ id, kind }` for clients that receive generation IDs. */
+function sendGenerationFailure(wsClient, identity, reason) {
   if (wsClient?.readyState !== wsClient?.OPEN) return;
   try {
     wsClient.send(JSON.stringify({
-      generation: failedGeneration(generationId, reason),
+      generation: failedGeneration(identity, reason),
       // Retained for older desktop clients that only understand final replies.
       ai_reply: "[Erreur du modèle]",
     }));

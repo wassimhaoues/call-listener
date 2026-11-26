@@ -84,8 +84,8 @@ test("only committed messages are replayable", () => {
   assert.equal(isCommittedMessage({ ai_reply: "Done" }), true);
   assert.equal(isCommittedMessage({ generation: { state: "failed" }, ai_reply: "[Erreur du modèle]" }), true);
   assert.equal(isCommittedMessage({ error: "interview_budget_reached" }), true);
-  assert.equal(isCommittedMessage({ generation: { id: "g1", state: "thinking" } }), false);
-  assert.equal(isCommittedMessage({ generation: { id: "g1", state: "streaming" }, delta: "x" }), false);
+  assert.equal(isCommittedMessage({ generation: { id: "g1", kind: "answer", state: "thinking" } }), false);
+  assert.equal(isCommittedMessage({ generation: { id: "g1", kind: "answer", state: "streaming" }, delta: "x" }), false);
 });
 
 test("an unsequenced channel forwards frames byte for byte", () => {
@@ -107,9 +107,9 @@ test("a sequenced channel numbers every frame and retains committed ones while d
   const channel = new SessionChannel();
   channel.enableSequencing();
   channel.send(JSON.stringify({ speaker: "caller", transcript: "Q?" }));
-  channel.send(JSON.stringify({ generation: { id: "g1", state: "thinking" } }));
-  channel.send(JSON.stringify({ generation: { id: "g1", state: "streaming" }, delta: "A" }));
-  channel.send(JSON.stringify({ ai_reply: "A.", generation: { id: "g1", state: "done" } }));
+  channel.send(JSON.stringify({ generation: { id: "g1", kind: "answer", state: "thinking" } }));
+  channel.send(JSON.stringify({ generation: { id: "g1", kind: "answer", state: "streaming" }, delta: "A" }));
+  channel.send(JSON.stringify({ ai_reply: "A.", generation: { id: "g1", kind: "answer", state: "done" } }));
   assert.equal(channel.readyState, 1, "a sequenced session accepts frames for replay while detached");
   assert.equal(channel.seq, 4);
 
@@ -118,7 +118,7 @@ test("a sequenced channel numbers every frame and retains committed ones while d
   assert.deepEqual(channel.replaySince(0), { replayed: 2, truncated: false });
   assert.deepEqual(sent, [
     { speaker: "caller", transcript: "Q?", seq: 1 },
-    { ai_reply: "A.", generation: { id: "g1", state: "done" }, seq: 4 },
+    { ai_reply: "A.", generation: { id: "g1", kind: "answer", state: "done" }, seq: 4 },
   ]);
 });
 
@@ -166,8 +166,8 @@ test("a client without the resume capability behaves exactly as before", async (
   assert.deepEqual(socket.outbound, [
     { ai_reply: "Intro." },
     { speaker: "caller", transcript: "Why this role?" },
-    { generation: { id: "g1", state: "thinking" } },
-    { ai_reply: "Because.", generation: { id: "g1", state: "done" } },
+    { generation: { id: "g1", kind: "answer", state: "thinking" } },
+    { ai_reply: "Because.", generation: { id: "g1", kind: "answer", state: "done" } },
   ], "no session, seq, or notice fields");
 
   assert.equal(harness.purged.length, 0, "nothing purged while connected");
@@ -234,7 +234,7 @@ test("disconnect keeps the session; resume replays committed messages after last
   await resumed.receive({ resume: { sessionId, lastSeq: seenSeq } });
   assert.deepEqual(resumed.outbound, [
     { speaker: "caller", transcript: "Tell me about Redis?", seq: 2 },
-    { ai_reply: "Mention the migration.", generation: { id: "g1", state: "done" }, seq: 4 },
+    { ai_reply: "Mention the migration.", generation: { id: "g1", kind: "answer", state: "done" }, seq: 4 },
     { resumed: { sessionId, seq: 4 } },
     { notice: "audio_gap" },
   ], "thinking (seq 3) is transient and not replayed");
@@ -249,8 +249,8 @@ test("disconnect keeps the session; resume replays committed messages after last
   await harness.settle();
   assert.deepEqual(resumed.outbound.slice(4), [
     { speaker: "caller", transcript: "And Kafka?", seq: 5 },
-    { generation: { id: "g2", state: "thinking" }, seq: 6 },
-    { ai_reply: "Talk about streams.", generation: { id: "g2", state: "done" }, seq: 7 },
+    { generation: { id: "g2", kind: "answer", state: "thinking" }, seq: 6 },
+    { ai_reply: "Talk about streams.", generation: { id: "g2", kind: "answer", state: "done" }, seq: 7 },
   ]);
 
   // Transcription reopens lazily on the next audio chunk.
@@ -277,7 +277,7 @@ test("a generation in flight at disconnect is reported failed and never re-run",
   await harness.settle();
   assert.deepEqual(resumed.outbound, [
     {
-      generation: { id: "g1", state: "failed", reason: "disconnected" },
+      generation: { id: "g1", kind: "answer", state: "failed", reason: "disconnected" },
       ai_reply: "[Erreur du modèle]",
       seq: seenSeq + 1,
     },

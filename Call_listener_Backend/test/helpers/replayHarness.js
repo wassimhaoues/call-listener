@@ -35,6 +35,7 @@ export function createReplayHarness({
   // Replays flush streamed deltas only on completion so they stay timer-free
   // and deterministic; time-based batching is covered by unit tests.
   streamFlushMs = 60_000,
+  actionMinIntervalMs = 0,
   sessionId = "replay-session",
 } = {}) {
   const redis = createMemoryRedis();
@@ -91,6 +92,8 @@ export function createReplayHarness({
   // assert ordering, so it is disabled to keep them fast and timer-free.
   streamManager.REPLY_COOLDOWN_MS = 0;
   streamManager.STREAM_FLUSH_MS = streamFlushMs;
+  // Likewise for the response-action interval; rate limits have unit tests.
+  streamManager.ACTION_MIN_INTERVAL_MS = actionMinIntervalMs;
 
   const handleMessage = createMessageHandler({
     ChatHistory,
@@ -168,6 +171,9 @@ export function createReplayHarness({
         break;
       case "typed":
         await sendRaw(JSON.stringify({ interviewer_question: step.text }));
+        break;
+      case "action":
+        await sendRaw(JSON.stringify({ action: { type: step.action, generationId: step.generationId } }));
         break;
       case "raw":
         await sendRaw(step.data);
