@@ -1,5 +1,8 @@
 # Installs the NSIS build silently, launches the packaged app, records a
-# screenshot and logs, then uninstalls and checks cleanup.
+# screenshot and logs, checks the sign-in identity and the Start-menu
+# AppUserModelID, reinstalls over itself (upgrade) and relaunches to check
+# that user data and the OS-encrypted secret survive, then uninstalls and
+# checks cleanup.
 # Usage: pwsh scripts/ci/smoke-installer.ps1 -Installer <path> [-OutDir ci-smoke]
 param(
   [Parameter(Mandatory = $true)][string]$Installer,
@@ -46,7 +49,41 @@ if (-not $alive) {
 }
 Write-Host "App running: $($alive.Count) process(es)"
 
-$userData = Join-Path $env:APPDATA "Call Listener"
+# Electron names the user-data directory after the app name: package.json
+# "name" (call-listener) unless a top-level productName is set.
+$userData = @("call-listener", "Call Listener") |
+  ForEach-Object { Join-Path $env:APPDATA $_ } |
+  Where-Object { Test-Path (Join-Path $_ "installation-id") } |
+  Select-Object -First 1
+if (-not $userData) {
+  Get-ChildItem $env:APPDATA -Directory | Select-Object -ExpandProperty Name | Write-Host
+  throw "No user-data directory with an installation-id under $env:APPDATA"
+}
+Write-Host "User data: $userData"
+$idFile = Join-Path $userData "installation-id"
+$secretFile = Join-Path $userData "device-secret.bin"
+# Created at startup by services/deviceCredentials.js; the secret is
+# encrypted with DPAPI through Electron safeStorage. Values are never printed.
+if (-not (Test-Path $idFile)) { throw "installation-id was not created in $userData" }
+if (-not (Test-Path $secretFile)) { throw "device-secret.bin was not created (safeStorage unavailable?)" }
+$idBefore = (Get-Content $idFile -Raw).Trim()
+$secretHashBefore = (Get-FileHash $secretFile -Algorithm SHA256).Hash
+Write-Host "Sign-in identity created (installation ID and encrypted secret present)"
+
+# The Start-menu shortcut's AppUserModelID must equal build.appId, which is
+# what the running app sets (services/appIdentity.js).
+$expectedAumid = (Get-Content (Join-Path $PSScriptRoot "..\..\package.json") -Raw | ConvertFrom-Json).build.appId
+$startMenu = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs"
+$shortcut = Get-ChildItem -Path $startMenu -Recurse -Filter "Call Listener.lnk" -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $shortcut) {
+  Write-Warning "Start-menu shortcut not found; AppUserModelID not checked"
+} else {
+  $shell = New-Object -ComObject Shell.Application
+  $aumid = $shell.NameSpace($shortcut.DirectoryName).ParseName($shortcut.Name).ExtendedProperty("System.AppUserModel.ID")
+  if ($aumid -ne $expectedAumid) { throw "Shortcut AppUserModelID '$aumid' does not match build.appId '$expectedAumid'" }
+  Write-Host "Shortcut AppUserModelID matches build.appId ($aumid)"
+}
+
 if (Test-Path $userData) {
   Get-ChildItem $userData -File -Filter *.log -ErrorAction SilentlyContinue |
     Copy-Item -Destination $OutDir
@@ -55,6 +92,22 @@ if (Test-Path $userData) {
   }
 }
 
+$alive | Stop-Process -Force
+Start-Sleep -Seconds 3
+
+# Upgrade in place: install the same build over the existing installation,
+# relaunch, and require the same identity (a lost or undecryptable secret
+# would make the app start over with a new installation ID).
+Write-Host "Reinstalling over the existing installation"
+$reinstall = Start-Process -FilePath $Installer -ArgumentList "/S" -Wait -PassThru
+if ($reinstall.ExitCode -ne 0) { throw "Reinstall exited with $($reinstall.ExitCode)" }
+$app = Start-Process -FilePath $exe.FullName -PassThru -RedirectStandardOutput (Join-Path $OutDir "app-stdout-2.log") -RedirectStandardError (Join-Path $OutDir "app-stderr-2.log")
+Start-Sleep -Seconds 15
+$alive = Get-Process -Name "Call Listener" -ErrorAction SilentlyContinue
+if (-not $alive) { throw "App did not stay running after the reinstall" }
+if ((Get-Content $idFile -Raw).Trim() -ne $idBefore) { throw "installation-id changed across the reinstall" }
+if ((Get-FileHash $secretFile -Algorithm SHA256).Hash -ne $secretHashBefore) { throw "device-secret.bin was replaced across the reinstall" }
+Write-Host "Reinstall kept the installation identity and the encrypted secret"
 $alive | Stop-Process -Force
 Start-Sleep -Seconds 3
 

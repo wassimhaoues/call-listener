@@ -134,7 +134,7 @@ Rollback: stop new saves/reviews while preserving existing saved data in a reada
 Depends on Phase 7 for the full release; a limited live-interview pilot may ship after Phase 6 passes its gates.
 
 - [ ] Run the complete [validation matrix](05-validation-and-rollout.md), including supported old/new client combinations.
-- [ ] Verify clean Windows installation, upgrade, app identity/user-data continuity, driver handling, tray behavior, uninstall audio restoration, and updater configuration.
+- [ ] Verify clean Windows installation, upgrade, app identity/user-data continuity, driver handling, tray behavior, uninstall audio restoration, and updater configuration. **Update 2026-11-26:** CI now installs silently, checks that first launch creates the installation ID and the DPAPI-encrypted enrollment secret, that the Start-menu shortcut AppUserModelID equals `build.appId`, reinstalls over itself and relaunches with the identity unchanged, then uninstalls. An older-release → new upgrade (needs a published release), driver handling, tray behavior, and uninstall audio restoration on physical hardware remain.
 - [ ] Complete Linux AppImage/`.deb` qualification before claiming Linux support.
 - [ ] Deploy backend capabilities first with flags off, then the desktop pilot, then enable compatible features for the pilot cohort.
 - [ ] Monitor latency, error rate, stale output, restoration failures, and actual cost; rehearse rollback using the retained installer/container versions.
