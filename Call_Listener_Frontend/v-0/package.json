@@ -74,7 +74,11 @@
       "syncDesktopName": true
     },
     "deb": {
-      "compression": "gz"
+      "compression": "gz",
+      "recommends": [
+        "libappindicator3-1",
+        "pulseaudio-utils"
+      ]
     },
     "nsis": {
       "oneClick": true,

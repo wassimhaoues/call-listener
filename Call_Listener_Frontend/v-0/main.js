@@ -318,6 +318,16 @@ async function createWindow(authMgr, platformAudio, capabilities) {
   // ---- Renderer-safe APIs ----------------------------------------------------
   ipcMain.handle("auth:getWsUrl", async () => authMgr.makeSignedWsUrl());
   ipcMain.handle("platform:getCapabilities", () => capabilities);
+  // Linux only, on an explicit Setup action: add a remapped monitor of the
+  // default output so it can be chosen as interviewer audio. Returns only a
+  // status and a stable code, never command output.
+  ipcMain.handle("audio:createInterviewerSource", async () => {
+    if (typeof platformAudio.createInterviewerSource !== "function") {
+      return { ok: false, code: "not-supported" };
+    }
+    const result = await platformAudio.createInterviewerSource();
+    return result?.ok ? { ok: true } : { ok: false, code: result?.code || "failed" };
+  });
   ipcMain.on("session:interviewActive", (_event, active) => {
     const next = active === true;
     if (next === interviewActive) return;

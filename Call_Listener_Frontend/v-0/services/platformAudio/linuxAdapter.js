@@ -1,12 +1,20 @@
 // services/platformAudio/linuxAdapter.js
 //
-// Linux never changes OS audio routing: no sound-server commands, no virtual
-// sinks, no default-device changes. The adapter owns only streams the app
-// itself registers (trackStream) and stops exactly those on disable/exit.
+// Linux never changes OS audio routing: no virtual sinks and no default-device
+// changes. The adapter owns only streams the app itself registers
+// (trackStream) and stops exactly those on disable/exit.
+//
+// The one sound-server change is opt-in: on an explicit candidate action,
+// createInterviewerSource() adds a remapped monitor of the default output
+// (see linuxInterviewerSource.js) so Chromium can list it. That source is
+// removed on exit, and any copy left by a crash is removed at startup.
 //
 // Until L2 (PipeWire desktop capture) is qualified it reports microphone-only
 // capture regardless of what the capability probe says about PipeWire.
-function createLinuxAudioAdapter({ logger = console } = {}) {
+const { createLinuxInterviewerSource } = require("./linuxInterviewerSource");
+
+function createLinuxAudioAdapter({ logger = console, interviewerSource } = {}) {
+  const remap = interviewerSource || createLinuxInterviewerSource({ logger });
   const streams = new Map(); // id -> { stop }
   let state = "idle"; // idle | prepared | ready | exited
   let lastError = null;
@@ -31,8 +39,18 @@ function createLinuxAudioAdapter({ logger = console } = {}) {
     controlsOsRouting: false,
 
     async prepare() {
-      if (state === "idle") state = "prepared";
+      if (state === "idle") {
+        state = "prepared";
+        // A source left by a crashed run would otherwise stay until reboot.
+        await remap.remove();
+      }
       return { ok: true };
+    },
+
+    /** Explicit candidate action only. Resolves { ok, label } | { ok: false, code }. */
+    async createInterviewerSource() {
+      if (state === "exited") return { ok: false, code: "exited" };
+      return remap.create();
     },
 
     async ensureReady() {
@@ -90,6 +108,7 @@ function createLinuxAudioAdapter({ logger = console } = {}) {
       if (state === "exited") return;
       stopAll();
       state = "exited";
+      await remap.remove();
     },
 
     describe() {

@@ -7,6 +7,8 @@ const isDev = process.env.NODE_ENV === "development";
 contextBridge.exposeInMainWorld("callApi", {
   getWsUrl: () => ipcRenderer.invoke("auth:getWsUrl"),
   getPlatformCapabilities: () => ipcRenderer.invoke("platform:getCapabilities"),
+  // Linux Setup only: resolves { ok: true } or { ok: false, code }.
+  createInterviewerSource: () => ipcRenderer.invoke("audio:createInterviewerSource"),
   getModels: () => ipcRenderer.invoke("models:list"),
   // Tells main whether an interview is capturing audio (tray status and the
   // close-to-tray notice). Only a boolean crosses the bridge.

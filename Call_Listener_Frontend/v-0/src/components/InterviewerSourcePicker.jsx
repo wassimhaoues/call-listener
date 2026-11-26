@@ -43,6 +43,41 @@ function ScanMessage({ scan, labelsVisible, monitorCount }) {
  * system output, chosen explicitly by the candidate. "None" (typed interviewer
  * questions) is the default and is never replaced automatically.
  */
+const CREATE_FAILURES = {
+  "pactl-unavailable":
+    "The source could not be added because the pactl tool is missing. Install pulseaudio-utils (or pipewire-pulse) and try again.",
+  "no-default-output": "No default output device was found. Connect your speakers or headset and try again.",
+  "not-found":
+    "The source was added but Call Listener cannot see it yet. Select Refresh, or restart Call Listener.",
+};
+const CREATE_FAILED_DEFAULT = "The source could not be added. Select Refresh to try again, or type the interviewer’s questions.";
+
+/**
+ * Offer to add a system output source when none is visible. Only shown when
+ * the main process provides onCreateSource (Linux).
+ */
+function CreateSourceOffer({ onCreateSource, createState }) {
+  const creating = createState === "creating";
+  const failure = createState?.startsWith("failed:") ? createState.slice(7) : null;
+  return (
+    <div className="flex flex-col gap-2 items-start">
+      <p className="text-sm">
+        Call Listener can add a source that mirrors your default speakers or
+        headset, so the interviewer can be transcribed. Your default devices
+        stay as they are, and the source is removed when you quit.
+      </p>
+      <Button variant="secondary" onClick={onCreateSource} disabled={creating}>
+        {creating ? "Adding…" : "Add system output source"}
+      </Button>
+      {failure && (
+        <p role="alert" className="text-sm text-[var(--text-2)]">
+          {CREATE_FAILURES[failure] || CREATE_FAILED_DEFAULT}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function InterviewerSourcePicker({
   monitors,
   value,
@@ -51,9 +86,13 @@ export default function InterviewerSourcePicker({
   scan,
   onAllowAccess,
   onRefresh,
+  onCreateSource,
+  createState = "idle",
 }) {
   const busy = scan === "scanning";
   const showPicker = labelsVisible && monitors.length > 0;
+  const offerCreate =
+    typeof onCreateSource === "function" && labelsVisible && monitors.length === 0 && scan === "ready";
   return (
     <section className="panel p-4 flex flex-col gap-3" aria-labelledby="interviewer-source-title">
       <div className="flex items-center justify-between gap-2">
@@ -89,6 +128,8 @@ export default function InterviewerSourcePicker({
       <div aria-live="polite">
         <ScanMessage scan={scan} labelsVisible={labelsVisible} monitorCount={monitors.length} />
       </div>
+
+      {offerCreate && <CreateSourceOffer onCreateSource={onCreateSource} createState={createState} />}
 
       {showPicker && (
         <label className="flex flex-col gap-1 text-sm">
