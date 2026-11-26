@@ -26,11 +26,14 @@ const isDev = process.env.NODE_ENV === "development" && !app.isPackaged;
 const gotLock = app.requestSingleInstanceLock();
 
 const { AUTH_APP_ID, WINDOWS_APP_USER_MODEL_ID } = require("./services/appIdentity");
-const BACKEND_HOST = process.env.CALL_HOST || (isDev ? "127.0.0.1" : "call.coworky.org");
-const BACKEND_PROTOCOL = process.env.CALL_PROTOCOL || (isDev ? "http" : "https");
-const BACKEND_PORT = Number(process.env.CALL_PORT || (isDev ? 3000 : 443));
-const WS_PROTOCOL = process.env.CALL_WS_PROTOCOL || (isDev ? "ws" : "wss");
-const WS_PORT = Number(process.env.CALL_WS_PORT || (isDev ? 4000 : 443));
+const { resolveBackendConfig } = require("./services/backendConfig");
+// The backend host ships in package.json (`callBackend.host`).
+const backend = resolveBackendConfig({ isDev, packageJson: require("./package.json") });
+const BACKEND_HOST = backend.host;
+const BACKEND_PROTOCOL = backend.protocol;
+const BACKEND_PORT = backend.port;
+const WS_PROTOCOL = backend.wsProtocol;
+const WS_PORT = backend.wsPort;
 const ELECTRON_KEY = process.env.ELECTRON_KEY || "dev-electron-only";
 const userDataDir = app.getPath("userData");
 
