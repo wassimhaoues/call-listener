@@ -24,7 +24,8 @@ The desktop client stops a session in this order: ask each audio worklet to flus
 
 | Message | Shape | Meaning |
 | --- | --- | --- |
-| Transcript | `{ "speaker": "you"|"caller", "transcript": "..." }` | A final Deepgram utterance, or the echo of a typed interviewer question (`caller`). These are legacy wire labels: `mic`/`you` is shown as **Candidate** and `system`/`caller` as **Interviewer** in the desktop UI. |
+| Transcript | `{ "speaker": "you"|"caller", "transcript": "..." }` | A final Deepgram utterance, or the echo of a typed interviewer question (`caller`). These are legacy wire labels: `mic`/`you` is shown as **Candidate** and `system`/`caller` as **Interviewer** in the desktop UI. A near-exact repeat of the same source's previous final utterance within 3 s is dropped (see [Utterance deduplication](#utterance-deduplication)); typed questions are never dropped. |
+| Interim transcript | `{ "interim": { "speaker": "you"|"caller", "text": "..." } }` | Interim-capable clients only. The in-progress speech of one source, replacing that speaker's previous interim line; `text: ""` clears it. Display-only: never stored, classified, or replayed. See [Interim transcripts](#interim-transcripts). |
 | Generation thinking | `{ "generation": { "state": "thinking" } }` (streaming clients: `{ "generation": { "id": "...", "state": "thinking" } }`) | Sent when a generation for the latest interviewer question starts (after the budget check, before the model call). Clients should hide the previous suggestion so stale guidance is not shown as the answer to the new question. A newer question aborts the in-flight generation; the superseded one sends nothing further, and the newer one sends its own `thinking`. |
 | Generation streaming | `{ "generation": { "id": "...", "state": "streaming" }, "delta": "..." }` | Streaming clients only. The next piece of the current generation's suggestion text; append it to the text received so far for that ID. See [Streamed suggestions](#streamed-suggestions). |
 | Generation failed | `{ "generation": { "state": "failed" }, "ai_reply": "[Erreur du modèle]" }` (streaming clients: `generation` also carries `id`) | Terminal for the current question: the model returned no text, timed out, or the pipeline failed. Transcription keeps running. `ai_reply` is retained only for older clients; clients that understand `generation` must prefer the failure state over the reply text. Not sent for superseded generations. |
@@ -67,6 +68,34 @@ Not streamed: the introductory suggestion sent after a context, and `interview_b
 
 Compatibility: clients that do not advertise `"stream"` (or `"actions"`, below) receive exactly the legacy messages (`{ "generation": { "state": "thinking" } }`, `{ "ai_reply": ... }`, and the failure shape, with no `id`, no `kind`, and no deltas). Servers older than this feature ignore the unknown `capabilities` key and send the legacy messages, which streaming clients must continue to handle.
 
+## Interim transcripts
+
+Interim lines are opt-in, like streaming. A client advertises them by listing `"interim"` in the context `capabilities` (the desktop client sends `["stream", "resume", "debrief", "interim"]`). The most recently accepted context decides: a context without `"interim"` stops them, and any pending line is dropped.
+
+While a source (`mic` → `you`, `system` → `caller`) is speaking, the server sends `{ "interim": { "speaker": "caller", "text": "Tell me about a time" } }`. `text` is the utterance so far: its finalized segments plus Deepgram's current hypothesis, trimmed. It is bounded to 500 characters (the newest part is kept).
+
+- **Replace, don't append.** Each interim frame replaces that speaker's previous interim line. A client holds at most one interim line per speaker.
+- **Final wins.** The speaker's final `{ "speaker", "transcript" }` message ends the line; the client replaces the interim line with the final transcript. A pending interim update is dropped when the final arrives, so no interim frame for an utterance follows its final.
+- **Clear.** `text: ""` clears the speaker's line without a final transcript: speech that produced no final text, or a final that was dropped as a duplicate.
+- **Throttled.** At most one interim frame per source every 200 ms (≤ 5/s); between frames only the newest text is kept, and unchanged text is not resent.
+- **Display-only.** Interim text is never stored in chat history, never classified, never starts a generation, and never reaches a model. Only final utterances do.
+- **Not committed.** In a resume-capable session interim frames carry a `seq` like every message but are never replayed after a resume. Clients should clear interim lines when the connection drops.
+- **Stops.** No interim frames are sent after `end`, after the socket closes, or while a resume-capable session is disconnected (its streams are stopped). The desktop client also clears its interim lines on pause and ignores interim frames while paused.
+
+Example:
+
+```json
+{ "interim": { "speaker": "caller", "text": "Tell me" } }
+{ "interim": { "speaker": "caller", "text": "Tell me about a time you led a migration." } }
+{ "speaker": "caller", "transcript": "Tell me about a time you led a migration." }
+```
+
+Compatibility: clients that do not advertise `"interim"` never receive `interim` frames. Servers older than this feature ignore the capability and send only final transcripts.
+
+## Utterance deduplication
+
+Deepgram can deliver the same final speech twice around an utterance boundary. The server drops a final utterance (it is not stored, sent, or classified, so it cannot start a second generation) when, within 3 s of the same source's previous final utterance, its normalized text (case, punctuation, and whitespace ignored) is identical to it, or repeats its last words (at least three). A repeat extends the window. Shorter follow-ups such as "Why?" and typed interviewer questions are never dropped. If an interim line was shown for a dropped utterance, an interim-capable client receives `{ "interim": { "speaker": ..., "text": "" } }` instead of a transcript.
+
 ## Response actions
 
 A candidate can ask for a different take on the current suggestion with `{ "action": { "type": ..., "generationId": ... } }`:
@@ -105,7 +134,7 @@ Actions are charged to the interview budget like any generation. When the budget
 
 ## Unsaved debrief
 
-At the end of an interview the candidate can ask for a review of it. It is opt-in twice: the client lists `"debrief"` in the context `capabilities` (the desktop client sends `["stream", "resume", "debrief"]`), and it ends with `{ "end": { "debrief": true } }`. Like other capabilities, the most recently accepted context decides. `{ "end": true }` is unchanged for every client.
+At the end of an interview the candidate can ask for a review of it. It is opt-in twice: the client lists `"debrief"` in the context `capabilities` (the desktop client sends `["stream", "resume", "debrief", "interim"]`), and it ends with `{ "end": { "debrief": true } }`. Like other capabilities, the most recently accepted context decides. `{ "end": true }` is unchanged for every client.
 
 On a debrief end the server:
 
@@ -162,7 +191,7 @@ Compatibility: servers older than this feature ignore the `debrief` capability a
 
 ## Resumable sessions
 
-Resume is opt-in, like streaming. A client advertises it by listing `"resume"` in the context's `capabilities` array (the desktop client sends `["stream", "resume"]`). Once a session has accepted such a context, resume stays on for that session's lifetime, even if a later context omits `"resume"`, because the client depends on the sequence numbers. Clients that never send `"resume"` get exactly the behavior described above: no `seq`, no `session` message, and the session is purged as soon as the socket closes.
+Resume is opt-in, like streaming. A client advertises it by listing `"resume"` in the context's `capabilities` array (the desktop client sends `["stream", "resume", "debrief", "interim"]`). Once a session has accepted such a context, resume stays on for that session's lifetime, even if a later context omits `"resume"`, because the client depends on the sequence numbers. Clients that never send `"resume"` get exactly the behavior described above: no `seq`, no `session` message, and the session is purged as soon as the socket closes.
 
 ### Session identity and ownership
 
@@ -186,7 +215,7 @@ If a `resume` arrives for a session that is still attached to another open socke
 
 For a resume-capable session, every server message produced by the session carries an additive integer `seq` that starts at 1 and increases by one per message, including `thinking` and streamed deltas. Session-control frames (`session`, `resumed`, `notice`, and `resume_*` errors) carry no `seq`.
 
-The server keeps a replay buffer of **committed** messages only: transcripts, final and failed suggestions (anything with `ai_reply`), and errors. `thinking` and streaming deltas are never replayed, so a client sees gaps in `seq` after a resume; that is expected. The buffer holds at most the last 200 messages and 256 KiB per session. If messages after `lastSeq` were evicted, `resumed.truncated` is `true`.
+The server keeps a replay buffer of **committed** messages only: transcripts, final and failed suggestions (anything with `ai_reply`), and errors. `thinking`, streaming deltas, and `interim` frames are never replayed, so a client sees gaps in `seq` after a resume; that is expected. The buffer holds at most the last 200 messages and 256 KiB per session. If messages after `lastSeq` were evicted, `resumed.truncated` is `true`.
 
 ### Resume handshake
 

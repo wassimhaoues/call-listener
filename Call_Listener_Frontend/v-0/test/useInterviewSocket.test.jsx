@@ -54,7 +54,7 @@ describe("useInterviewSocket", () => {
     expect(ws.url).toBe("wss://example.test/ws");
     expect(ws.binaryType).toBe("arraybuffer");
     expect(dispatch).toHaveBeenCalledWith(connectionChanged(CONNECTION.OPEN));
-    expect(ws.sentMessages).toEqual([{ context: { version: 1, capabilities: ["stream", "resume", "debrief"] } }]);
+    expect(ws.sentMessages).toEqual([{ context: { version: 1, capabilities: ["stream", "resume", "debrief", "interim"] } }]);
   });
 
   it("defaults to window.callApi.getWsUrl", async () => {

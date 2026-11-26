@@ -191,7 +191,7 @@ describe("useInterviewSocket reconnection", () => {
     act(() => second.serverSend({ error: "resume_expired" }));
     expect(second.sentMessages).toEqual([
       { resume: { sessionId: "sess-1", lastSeq: 3 } },
-      { context: { version: 1, capabilities: ["stream", "resume", "debrief"] } },
+      { context: { version: 1, capabilities: ["stream", "resume", "debrief", "interim"] } },
     ]);
     expect(dispatched(dispatch)).toEqual([
       connectionChanged(CONNECTION.OPEN),
@@ -216,7 +216,7 @@ describe("useInterviewSocket reconnection", () => {
     const second = FakeWebSocket.latest();
     act(() => second.serverOpen());
     act(() => second.serverSend({ error: "resume_rejected" }));
-    expect(second.sentMessages.at(-1)).toEqual({ context: { version: 1, capabilities: ["stream", "resume", "debrief"] } });
+    expect(second.sentMessages.at(-1)).toEqual({ context: { version: 1, capabilities: ["stream", "resume", "debrief", "interim"] } });
   });
 
   it("Stop cancels a pending reconnect", async () => {
@@ -277,7 +277,7 @@ describe("useInterviewSocket reconnection", () => {
     await act(() => result.current.startNewSession());
     const fresh = FakeWebSocket.latest();
     act(() => fresh.serverOpen());
-    expect(fresh.sentMessages).toEqual([{ context: { version: 1, capabilities: ["stream", "resume", "debrief"] } }]);
+    expect(fresh.sentMessages).toEqual([{ context: { version: 1, capabilities: ["stream", "resume", "debrief", "interim"] } }]);
     expect(dispatched(dispatch)).toEqual([
       connectionChanged(CONNECTION.CONNECTING),
       connectionChanged(CONNECTION.OPEN),

@@ -19,6 +19,8 @@ export class DeepgramService extends EventEmitter {
     this.conn = null;
     this.keepAliveTimer = null;
     this.buffer = "";
+    // Whether an interim line was emitted since the last completed utterance.
+    this.interimShown = false;
   }
 
   async start() {
@@ -64,16 +66,27 @@ export class DeepgramService extends EventEmitter {
     });
 
     conn.on(LiveTranscriptionEvents.Transcript, (data) => {
-      const text = data.channel.alternatives[0]?.transcript?.trim();
-      if (text && data.is_final) this.buffer += text + " ";
+      const text = data.channel?.alternatives?.[0]?.transcript?.trim();
+      if (!text) return;
+      if (data.is_final) this.buffer += text + " ";
+      // In-progress speech: the utterance's finalized segments so far plus
+      // the current non-final hypothesis. Display-only (see StreamManager).
+      const interim = data.is_final ? this.buffer : this.buffer + text;
+      this.interimShown = true;
+      this.emit("interim", { label, text: interim.trim() });
     });
 
     conn.on(LiveTranscriptionEvents.UtteranceEnd, () => {
       const text = this.buffer.trim();
+      this.buffer = "";
       if (text) {
+        this.interimShown = false;
         this.log.info(`💬 [${label}] Utterance completed (${text.length} chars)`);
         this.emit("utterance", { label, text });
-        this.buffer = "";
+      } else if (this.interimShown) {
+        // Speech that never produced a final segment: end its interim line.
+        this.interimShown = false;
+        this.emit("interim", { label, text: "" });
       }
     });
   }

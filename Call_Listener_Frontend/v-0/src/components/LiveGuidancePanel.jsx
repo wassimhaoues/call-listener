@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useId, useState } from "react";
 import SuggestionText from "./SuggestionText.jsx";
+import { suggestionPreview } from "@/services/suggestionPreview.js";
 
 // What the shown suggestion is: a normal answer or the result of an action.
 export const SUGGESTION_KIND_LABELS = Object.freeze({
@@ -76,6 +77,34 @@ function ResponseActions({ enabled, pendingAction, actionError, onResponseAction
   );
 }
 
+// A completed long suggestion shows its first sentences with a Show more /
+// Show less toggle. Streamed (partial) text is always shown in full. The
+// expansion belongs to one suggestion: a new suggestion starts collapsed.
+function ExpandableSuggestion({ text, isStreaming }) {
+  const [expandedText, setExpandedText] = useState(null);
+  const contentId = useId();
+  const preview = isStreaming ? null : suggestionPreview(text);
+  const expanded = expandedText === text;
+
+  if (preview === null) return <SuggestionText text={text} />;
+  return (
+    <>
+      <div id={contentId}>
+        <SuggestionText text={expanded ? text : preview} />
+      </div>
+      <button
+        aria-controls={contentId}
+        aria-expanded={expanded}
+        className="btn btn-ghost h-8 px-2 text-xs"
+        onClick={() => setExpandedText(expanded ? null : text)}
+        type="button"
+      >
+        {expanded ? "Show less" : "Show more"}
+      </button>
+    </>
+  );
+}
+
 // "Model: <actual || selected>", naming the requested model too when the
 // provider reports that a different one served the request.
 export function formatModelLabel(model) {
@@ -143,7 +172,7 @@ export default function LiveGuidancePanel({
           ) : (
             // Streamed text is partial model output: rendered as plain text
             // like the final reply, and replaced by it on completion.
-            <SuggestionText text={suggestion} />
+            <ExpandableSuggestion isStreaming={isStreaming} text={suggestion} />
           )}
         </div>
         {isStreaming && (
