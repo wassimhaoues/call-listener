@@ -39,6 +39,7 @@ export function createModelCatalog({
   ttlMs = DEFAULT_CATALOG_TTL_MS,
   fetchTimeoutMs = DEFAULT_CATALOG_FETCH_TIMEOUT_MS,
   now = () => Date.now(),
+  onRefresh,
   log,
 } = {}) {
   const enabled = provider === "openrouter";
@@ -67,12 +68,24 @@ export function createModelCatalog({
     return upstream;
   }
 
+  // `onRefresh` sees each fresh snapshot (the server checks configured
+  // prices against catalog prices). A failing observer never breaks the catalog.
+  function notifyRefresh() {
+    if (typeof onRefresh !== "function") return;
+    try {
+      onRefresh(snapshot().models);
+    } catch (error) {
+      log?.warn?.("Model catalog refresh observer failed: %s", error?.message || "unknown error");
+    }
+  }
+
   function refresh() {
     if (!inFlight) {
       inFlight = fetchUpstream()
         .then((upstream) => {
           cache = { upstream, fetchedAt: now() };
           lastFailureAt = null;
+          notifyRefresh();
         })
         .catch((error) => {
           lastFailureAt = now();

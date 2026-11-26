@@ -37,6 +37,7 @@ test("model allowlist defaults to OPENROUTER_MODEL and rejects lists without it"
   const configured = await loadAllowlist({
     OPENROUTER_MODEL: "openai/gpt-4.1-mini",
     OPENROUTER_ALLOWED_MODELS: "openai/gpt-4.1-mini,anthropic/claude-test",
+    OPENROUTER_MODEL_PRICES: JSON.stringify({ "anthropic/claude-test": { input: 3, output: 15 } }),
   });
   assert.deepEqual(JSON.parse(configured.stdout), ["openai/gpt-4.1-mini", "anthropic/claude-test"]);
 

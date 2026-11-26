@@ -56,7 +56,9 @@ for (const providerCase of cases) {
       assert.deepEqual(bases, [{
         inputChars: "system prompt".length + "caller: question".length,
         outputChars: adapter.text.length,
-      }], "usage is reported with char counts for a fallback estimate");
+        model: "fixture/model",
+        actualModel: null,
+      }], "usage is reported with char counts for a fallback estimate and the model to price");
     }
     assert.equal(provider.calls.length, 1, "the adapter never retries");
   });

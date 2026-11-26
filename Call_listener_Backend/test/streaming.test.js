@@ -102,7 +102,12 @@ test("adapter streams text deltas and derives usage and model from the chunks", 
   assert.equal(state.constructed[0].streamUsage, true, "usage is requested on streamed responses");
   assert.deepEqual(usage, [[
     { input_tokens: 40, output_tokens: 6, total_tokens: 46 },
-    { inputChars: "system".length + "history".length, outputChars: text.length },
+    {
+      inputChars: "system".length + "history".length,
+      outputChars: text.length,
+      model: "test/model",
+      actualModel: "test/model-2026",
+    },
   ]]);
   assert.deepEqual(models, [{ selected: "test/model", actual: "test/model-2026" }]);
 });
@@ -129,7 +134,7 @@ test("adapter reports missing streamed usage so the budget charges an estimate",
     onUsage: (value, basis) => calls.push([value, basis]),
   });
   assert.equal(text, "No usage here.");
-  assert.deepEqual(calls, [[undefined, { inputChars: 7, outputChars: 14 }]]);
+  assert.deepEqual(calls, [[undefined, { inputChars: 7, outputChars: 14, model: "test/model", actualModel: null }]]);
 });
 
 test("adapter falls back to raw response_metadata usage on streamed chunks", async () => {

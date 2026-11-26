@@ -5,6 +5,7 @@ import { loggers } from "./core/logger/index.js";
 import { CONFIG } from "./config/env.js";
 import { createApp } from "./app.js";
 import { createModelCatalog } from "./services/ai/modelCatalog.js";
+import { createConfiguredPricing } from "./services/ai/modelPricing.js";
 import { createConfiguredPreparationBrief } from "./services/preparation/configuredPreparation.js";
 import fs from "fs";
 import path from "path";
@@ -17,11 +18,14 @@ const wss = startWebSocketServer({
   config: CONFIG,
   handleAuthenticatedConnection: handleConnection,
 });
+const modelPricing = createConfiguredPricing(CONFIG, loggers.ai);
 const modelCatalog = createModelCatalog({
   provider: CONFIG.AI_PROVIDER,
   allowedModels: CONFIG.OPENROUTER_ALLOWED_MODELS,
   defaultModel: CONFIG.OPENROUTER_MODEL,
   ttlMs: CONFIG.OPENROUTER_CATALOG_TTL_MS,
+  // Warn (never re-price) when a configured price is below OpenRouter's.
+  onRefresh: (models) => modelPricing.warnIfBelowCatalog(models),
   log: loggers.ai,
 });
 const preparationBrief = createConfiguredPreparationBrief({
@@ -59,3 +63,9 @@ process.on("unhandledRejection", (e) => {
   log.error("Unhandled rejection: %o", e);
   shutdown("unhandledRejection");
 });
+
+if (CONFIG.AI_PROVIDER === "openrouter") {
+  // One catalog lookup once the servers are up, so an underpriced model is
+  // reported at startup. getCatalog never rejects; a failed lookup is logged.
+  await modelCatalog.getCatalog();
+}

@@ -1,5 +1,6 @@
 import dotenv from "dotenv";
 import { parseModelAllowlist } from "./modelAllowlist.js";
+import { resolveModelPrices } from "./modelPrices.js";
 
 dotenv.config({ quiet: true });
 
@@ -84,6 +85,17 @@ for (const key of [
     throw new Error(`${key} must be a non-negative number`);
   }
 }
+
+// Per-model billing prices. Every allowlisted model must be priced when
+// OpenRouter is the provider; the default model may use the single-price pair.
+CONFIG.OPENROUTER_MODEL_PRICES = resolveModelPrices({
+  value: process.env.OPENROUTER_MODEL_PRICES,
+  allowedModels: CONFIG.OPENROUTER_ALLOWED_MODELS,
+  defaultModel: OPENROUTER_MODEL,
+  defaultInputUsdPerMillionTokens: CONFIG.OPENROUTER_INPUT_USD_PER_MILLION_TOKENS,
+  defaultOutputUsdPerMillionTokens: CONFIG.OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS,
+  requireAll: AI_PROVIDER === "openrouter",
+});
 
 for (const key of [
   "PREPARATION_MAX_OUTPUT_TOKENS",

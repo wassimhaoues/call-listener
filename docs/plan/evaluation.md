@@ -106,7 +106,7 @@ Each answer is scored, then the scores are aggregated per variant. Errors and sk
 | Language match | A stopword-ratio heuristic over small English and French stopword lists must detect the expected answer language. |
 | Length compliance | At least 5 words for every setting. `short` allows at most 80 words and 3 sentences, which matches the prompt's instruction. `standard` allows at most 180 words and `detailed` at most 380, both under the 600-token output cap. |
 | Latency p50 / p95 | Nearest-rank percentiles of wall time per call, from the start of the variant to the reply. This includes evidence selection and LangGraph overhead. |
-| Tokens and cost | Reported usage when the provider gives it. Otherwise `ceil(chars / 4)`, as in `interviewBudget.js`. Cost is tokens × `OPENROUTER_INPUT_USD_PER_MILLION_TOKENS` / `OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS` (default 0.2 / 1.2). |
+| Tokens and cost | Reported usage when the provider gives it. Otherwise `ceil(chars / 4)`, as in `interviewBudget.js`. Cost is tokens × the run model's input/output price per million: its `OPENROUTER_MODEL_PRICES` entry, or for the default model `OPENROUTER_INPUT_USD_PER_MILLION_TOKENS` / `OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS` (default 0.2 / 1.2). A live reply whose served model is in the table is charged at that model's price. |
 | Cancellation | Per variant, with a generator that only settles when it is aborted (never a provider). The variant must reject after the abort and produce no suggestion within 1 second. |
 
 ## Mapping to the Phase 4 exit gate
@@ -134,14 +134,15 @@ The fake baseline currently fails the relevance and usefulness-proxy gates: the 
   - `--live` is passed.
   - `--max-usd <n>` is a positive number.
   - `OPENROUTER_API_KEY` is set.
-  - Both per-million prices are positive. A zero price would make any cap meaningless.
   - `OPENROUTER_MAX_OUTPUT_TOKENS` (default 600) is a positive integer.
   - The model (`--model`, else `OPENROUTER_MODEL`) is in `OPENROUTER_ALLOWED_MODELS`, parsed with the server's `parseModelAllowlist`.
-- Before any call, the run prints its worst-case estimate: for each call, `ceil(prompt and history chars / 4)` input tokens plus the full output cap, priced at the configured rates. If the estimate exceeds `--max-usd`, the run stops with exit code 2 and sends nothing.
+  - The model has a price, read like the server (`server/config/modelPrices.js`): an `OPENROUTER_MODEL_PRICES` entry, or the single-price pair for the default model only. A malformed table is refused for every provider.
+  - Both of that model's per-million prices are positive. A zero price would make any cap meaningless.
+- Before any call, the run prints its worst-case estimate: for each call, `ceil(prompt and history chars / 4)` input tokens plus the full output cap, priced at the selected model's rates. If the estimate exceeds `--max-usd`, the run stops with exit code 2 and sends nothing.
 - During the run, the guard adds each call's actual cost (reported usage, or the estimate when usage is missing). It checks before every call that spent plus that call's worst case still fits under the cap. Otherwise it stops, and every remaining call is marked `skipped` with `max_usd_cap`. Calls run sequentially and without retries, so a refused call is never sent.
 - The API key is passed only to the production OpenRouter adapter (`createOpenRouterReplyGenerator`). It is never printed or written to a report. Provider failures are recorded by error code only, never by message. `npm run eval` reads `Call_listener_Backend/.env` through dotenv, so prices and the allowlist match the server's configuration.
 
-Per-model pricing is not implemented: one price pair covers every allowlisted model, as in the session budget (see [backend](../backend.md#model-catalog-and-selection)). Set the prices to the selected model's rates before a live run. The chars/4 heuristic can underestimate tokens for some languages and tokenizers. The full output cap usually dominates the estimate, and the running guard uses the reported usage.
+Prices are per model, as in the session budget (see [backend](../backend.md#per-model-pricing)); make sure the selected model's entry matches its current rates before a live run. The chars/4 heuristic can underestimate tokens for some languages and tokenizers. The full output cap usually dominates the estimate, and the running guard uses the reported usage.
 
 ## Tests
 
