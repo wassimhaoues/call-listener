@@ -67,6 +67,7 @@ export class StreamManager {
     this.generation = 0;
     this.transcriptionLanguage = "fr";
     this.activeGenerationController = null;
+    this.activeIntroController = null;
     this.pendingQuestion = null;
     this.replyTimer = null;
     this.questionVersion = 0;
@@ -284,12 +285,41 @@ export class StreamManager {
     }
   }
 
+  /**
+   * Start the lifecycle of one introductory suggestion. A newer intro (from a
+   * newer context message) aborts the previous one, and so does session end or
+   * socket close. Callers must check `isCurrent()` before sending output.
+   */
+  beginIntroGeneration() {
+    this.activeIntroController?.abort(new Error("superseded by newer context"));
+    const controller = new AbortController();
+    if (this.closed) {
+      controller.abort(new Error("session closed"));
+    } else {
+      this.activeIntroController = controller;
+    }
+    const sessionGeneration = this.generation;
+    return {
+      signal: controller.signal,
+      isCurrent: () =>
+        !this.closed &&
+        !controller.signal.aborted &&
+        sessionGeneration === this.generation &&
+        this.activeIntroController === controller,
+      finish: () => {
+        if (this.activeIntroController === controller) this.activeIntroController = null;
+      },
+    };
+  }
+
   async closeAll() {
     if (this.closePromise) return this.closePromise;
 
     this.closed = true;
     this.generation += 1;
     this.activeGenerationController?.abort(new Error("session closed"));
+    this.activeIntroController?.abort(new Error("session closed"));
+    this.activeIntroController = null;
     clearTimeout(this.replyTimer);
     this.replyTimer = null;
     this.pendingQuestion = null;

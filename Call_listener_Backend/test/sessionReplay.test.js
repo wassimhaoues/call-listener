@@ -137,18 +137,52 @@ test("replay metrics record per-step durations from an injected clock", async ()
   assert.deepEqual(metrics.summary(), { count: 3, totalMs: 45, maxMs: 40, slowest: "generation" });
 });
 
-test(
-  "an introduction that completes after end is not sent",
-  { todo: "Intro generation in messageHandler has no lifecycle guard or abort signal yet (Phase 1)." },
-  async () => {
-    const harness = createReplayHarness({ responses, contexts, providerScript: ["lateIntro"] });
-    const pendingContext = harness.send({ context: contexts.valid.validEn.payload });
-    await harness.waitUntil(() => harness.provider.pendingCount() === 1, "the intro request");
+test("an introduction that completes after end is not sent", async () => {
+  const harness = createReplayHarness({ responses, contexts, providerScript: ["lateIntro"] });
+  const pendingContext = harness.send({ context: contexts.valid.validEn.payload });
+  await harness.waitUntil(() => harness.provider.pendingCount() === 1, "the intro request");
 
-    await harness.send({ end: true });
-    harness.provider.calls[0].release();
-    await pendingContext;
+  await harness.send({ end: true });
+  harness.provider.calls[0].release?.();
+  await pendingContext;
+  for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setImmediate(resolve));
 
-    assert.deepEqual(harness.outbound, []);
-  }
-);
+  assert.deepEqual(harness.outbound, [], "no intro, no error after end");
+  assert.equal(harness.provider.calls[0].status, "rejected", "the intro request was aborted");
+  assert.equal(harness.provider.pendingCount(), 0);
+  assert.deepEqual(harness.usageCalls, []);
+});
+
+test("a context sent after end does not start an introduction", async () => {
+  const harness = createReplayHarness({ responses, contexts });
+  await harness.send({ end: true });
+  await harness.send({ context: contexts.valid.validEn.payload });
+
+  assert.deepEqual(harness.outbound, []);
+  assert.equal(harness.provider.calls.length, 0);
+});
+
+test("a newer context supersedes an in-flight introduction", async () => {
+  const harness = createReplayHarness({
+    responses,
+    contexts,
+    providerScript: ["hangUntilAborted", "introSuccess"],
+  });
+  const firstContext = harness.send({ context: contexts.valid.validEn.payload });
+  await harness.waitUntil(() => harness.provider.pendingCount() === 1, "the first intro request");
+
+  await harness.send({ context: contexts.valid.validEn.payload });
+  await firstContext;
+
+  assert.deepEqual(harness.outbound, [
+    { ai_reply: responses.introSuccess.content, model: { selected: "fixture/model", actual: null } },
+  ]);
+  assert.deepEqual(
+    harness.provider.calls.map(({ name, status }) => ({ name, status })),
+    [
+      { name: "hangUntilAborted", status: "rejected" },
+      { name: "introSuccess", status: "resolved" },
+    ]
+  );
+  await harness.streamManager.closeAll();
+});
