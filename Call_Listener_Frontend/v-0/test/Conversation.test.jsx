@@ -247,3 +247,32 @@ it("tells the candidate to pick another model when the choice is unsupported", a
   expect(screen.getByRole("alert")).toHaveTextContent(/isn.t available/);
   expect(screen.getByRole("alert")).toHaveTextContent(/Interview Settings/);
 });
+
+it("falls back to typed questions when the interviewer monitor source disappears", async () => {
+  localStorage.setItem("systemAudioEnabled", "true");
+  localStorage.setItem("sysId", "monitor-1");
+  localStorage.setItem("sysLabel", "Interviewer audio (system output)");
+  const ws = await renderConversation();
+  const [micStream, sysStream] = audio.streams;
+  expect(audio.getUserMedia.mock.calls[1][0].audio.deviceId).toEqual({ exact: "monitor-1" });
+  // While the interviewer source is live there is no typed-question box.
+  expect(screen.queryByLabelText("Interviewer question")).not.toBeInTheDocument();
+
+  act(() => sysStream.tracks[0].end());
+
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    /Interviewer audio \(system output\) was disconnected/
+  );
+  expect(screen.getByText("Interviewer audio disconnected")).toBeInTheDocument();
+  expect(sysStream.tracks[0].stop).toHaveBeenCalled();
+  expect(micStream.tracks[0].stop).not.toHaveBeenCalled();
+  // Nothing is sent on the interviewer's behalf.
+  expect(ws.sentMessages.some((m) => "interviewer_question" in m)).toBe(false);
+  expect(ws.sentMessages.some((m) => m.source === "system")).toBe(false);
+
+  fireEvent.change(screen.getByLabelText("Interviewer question"), {
+    target: { value: "Tell me about a hard bug." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Ask" }));
+  expect(ws.sentMessages).toContainEqual({ interviewer_question: "Tell me about a hard bug." });
+});

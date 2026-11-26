@@ -28,6 +28,7 @@ describe("getPlatformCapabilities", () => {
         supported: true,
         strategy: "pipewire-desktop",
         fallback: "monitor-source",
+        selectableSource: "monitor-source",
         requiresCandidateConsent: true,
       },
     });
@@ -41,6 +42,7 @@ describe("getPlatformCapabilities", () => {
       supported: false,
       strategy: "unavailable",
       fallback: "monitor-source",
+      selectableSource: "monitor-source",
     });
   });
 

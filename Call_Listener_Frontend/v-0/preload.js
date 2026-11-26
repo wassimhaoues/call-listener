@@ -11,7 +11,12 @@ contextBridge.exposeInMainWorld("callApi", {
   // Explicit candidate action only: resolves { ok, brief, model } or { ok: false, error }.
   generatePreparationBrief: (context) => ipcRenderer.invoke("preparation:brief", context),
   // Renderer-safe diagnostics snapshot (no host identifiers, no paths).
-  getDiagnostics: () => ipcRenderer.invoke("diagnostics:get"),
+  // Only the interviewer source kind (an enum string) is forwarded.
+  getDiagnostics: (request) =>
+    ipcRenderer.invoke("diagnostics:get", {
+      interviewerSource:
+        typeof request?.interviewerSource === "string" ? request.interviewerSource : undefined,
+    }),
 });
 
 // Optional: silence console output from renderer in production
