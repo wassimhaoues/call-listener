@@ -10,14 +10,20 @@ import LiveGuidancePanel from "@/components/LiveGuidancePanel.jsx";
 import TranscriptLog from "@/components/TranscriptLog.jsx";
 import { useAudioCapture } from "@/hooks/useAudioCapture.js";
 import { useInterviewSocket } from "@/hooks/useInterviewSocket.js";
-import { getDeviceSelectionError } from "@/services/audioCapture.js";
 import {
+  describeCaptureError,
+  getDeviceSelectionError,
+} from "@/services/audioCapture.js";
+import {
+  captureFailed,
+  captureStarted,
   conversationReducer,
   initialConversationState,
+  noticeShown,
   pauseChanged,
   STATUS,
-  statusChanged,
   typedQuestionSubmitted,
+  UNSUPPORTED_MODEL_TEXT,
 } from "@/services/conversationState.js";
 
 function readStoredContext() {
@@ -42,6 +48,8 @@ export default function Conversation() {
   // Read synchronously by the audio path, so it cannot wait for a re-render.
   const pausedRef = useRef(false);
   const isPaused = useCallback(() => pausedRef.current, []);
+  const stoppingRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const socket = useInterviewSocket({
     dispatch,
@@ -52,11 +60,11 @@ export default function Conversation() {
 
   function submitTypedInterviewerQuestion(question) {
     if (pausedRef.current) {
-      dispatch(statusChanged(STATUS.PAUSED_TYPED_QUESTION));
+      dispatch(noticeShown(STATUS.PAUSED_TYPED_QUESTION));
       return;
     }
     if (!socket.isOpen()) {
-      dispatch(statusChanged(STATUS.CONNECTION_UNAVAILABLE));
+      dispatch(noticeShown(STATUS.CONNECTION_UNAVAILABLE));
       return;
     }
     dispatch(typedQuestionSubmitted(question));
@@ -69,11 +77,26 @@ export default function Conversation() {
     dispatch(pauseChanged(nextPaused));
   }
 
-  function stopSession() {
-    capture.flush();
+  // Explicit Stop: deliver the final partial PCM batch (bounded wait), then
+  // send `{ end: true }`, close, release capture, and return to setup.
+  // Idempotent. This is the only path that navigates home; unmount cleanup
+  // (e.g. the offline redirect) must not override where the app is going.
+  async function stopSession() {
+    if (stoppingRef.current) return;
+    stoppingRef.current = true;
+    await capture.flush();
     socket.end();
     capture.stop();
-    nav("/");
+    if (mountedRef.current) nav("/");
+  }
+
+  // Capture could not start: explain why, release everything, and end the
+  // socket cleanly instead of leaving a session that looks live.
+  function failCapture(error) {
+    stoppingRef.current = true;
+    dispatch(captureFailed(describeCaptureError(error)));
+    socket.end();
+    capture.stop();
   }
 
   useEffect(() => {
@@ -115,6 +138,7 @@ export default function Conversation() {
   useEffect(() => {
     const micId = localStorage.getItem("micId");
     const sysId = localStorage.getItem("sysId");
+    mountedRef.current = true;
 
     (async () => {
       try {
@@ -128,8 +152,6 @@ export default function Conversation() {
       } catch {}
     })();
 
-    socket.connect();
-
     const selectionError = getDeviceSelectionError({
       micId,
       sysId,
@@ -138,14 +160,31 @@ export default function Conversation() {
     if (selectionError) {
       alert(selectionError);
       nav("/");
-    } else {
-      capture
-        .start({ micId, sysId, systemAudioEnabled })
-        .then(() => dispatch(statusChanged(STATUS.LISTENING)));
+      return undefined;
     }
-    return () => stopSession();
+
+    socket.connect();
+    capture
+      .start({ micId, sysId, systemAudioEnabled })
+      .then((started) => {
+        if (started) dispatch(captureStarted());
+      })
+      .catch((error) => {
+        if (mountedRef.current) failCapture(error);
+      });
+    // The socket and capture hooks end/release themselves on unmount
+    // (including a connect or getUserMedia still in flight). Never navigate
+    // here.
+    return () => {
+      mountedRef.current = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const alerts = [
+    state.captureError,
+    state.modelUnavailable ? UNSUPPORTED_MODEL_TEXT : "",
+  ].filter(Boolean);
 
   return (
     <div className="h-full flex flex-col">
@@ -165,6 +204,8 @@ export default function Conversation() {
               suggestion={state.suggestion}
               evidence={evidenceReferences}
               isThinking={state.isThinking}
+              model={state.model}
+              alerts={alerts}
               onSubmitTypedQuestion={
                 systemAudioEnabled ? undefined : submitTypedInterviewerQuestion
               }

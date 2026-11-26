@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   CAPTURE_SAMPLE_RATE,
+  CaptureError,
   floatToPcm16,
   microphoneConstraints,
   rmsToLevel,
@@ -9,23 +10,51 @@ import {
 } from "@/services/audioCapture.js";
 
 export const PCM_WORKLET_URL = new URL("../worklets/pcm-processor.js", import.meta.url);
+// Upper bound on how long Stop waits for the worklets' final partial batch.
+export const FLUSH_TIMEOUT_MS = 250;
 const SCRIPT_PROCESSOR_FRAME = 4096;
+
+function stopTracks(stream) {
+  try {
+    stream?.getTracks().forEach((track) => track.stop());
+  } catch {}
+}
+
+function closeContext(ctx) {
+  if (!ctx) return;
+  try {
+    Promise.resolve(ctx.close()).catch(() => {});
+  } catch {}
+}
 
 // Captures the candidate microphone and, when enabled, the interviewer
 // (system) device. Emits PCM16 48 kHz mono chunks through `onChunk(source,
 // buffer)` and exposes live levels for the meters. Pausing is enforced by the
 // chunk consumer, so capture and meters keep running while paused.
-export function useAudioCapture({ onChunk, workletUrl = PCM_WORKLET_URL }) {
+//
+// start() resolves true once capturing, false when stop()/unmount cancelled
+// it (anything acquired late is released), and rejects with a CaptureError
+// naming the failing source when getUserMedia fails (after releasing
+// everything it acquired).
+export function useAudioCapture({
+  onChunk,
+  workletUrl = PCM_WORKLET_URL,
+  flushTimeoutMs = FLUSH_TIMEOUT_MS,
+}) {
   const [levels, setLevels] = useState({ mic: SILENT_LEVEL, system: SILENT_LEVEL });
 
   const onChunkRef = useRef(onChunk);
   onChunkRef.current = onChunk;
+  // Bumped by stop(); a start() still awaiting devices sees it and backs out.
+  const sessionRef = useRef(0);
   const ctxRef = useRef(null);
   const keepRef = useRef(null);
   const micStreamRef = useRef(null);
   const sysStreamRef = useRef(null);
   const micNodeRef = useRef(null);
   const sysNodeRef = useRef(null);
+  // Worklet node -> callbacks waiting for its "flushed" acknowledgement.
+  const flushWaitersRef = useRef(new Map());
 
   const reportLevel = useCallback((source, rms) => {
     const level = rmsToLevel(rms);
@@ -34,25 +63,82 @@ export function useAudioCapture({ onChunk, workletUrl = PCM_WORKLET_URL }) {
     );
   }, []);
 
+  // Runs the flush callbacks waiting on `node`, or on every node.
+  const settleFlushWaiters = useCallback((node) => {
+    const waiters = flushWaitersRef.current;
+    const nodes = node ? [node] : [...waiters.keys()];
+    for (const key of nodes) {
+      const callbacks = waiters.get(key);
+      waiters.delete(key);
+      callbacks?.forEach((callback) => callback());
+    }
+  }, []);
+
+  // Releases media tracks, detaches processing handlers, and closes the
+  // AudioContext. Idempotent: later calls find nothing left to release.
+  const stop = useCallback(() => {
+    sessionRef.current += 1;
+    stopTracks(micStreamRef.current);
+    stopTracks(sysStreamRef.current);
+    try {
+      const micNode = micNodeRef.current;
+      const sysNode = sysNodeRef.current;
+      if (micNode?.port) micNode.port.onmessage = null;
+      if (sysNode?.port) sysNode.port.onmessage = null;
+      if (micNode?.onaudioprocess) micNode.onaudioprocess = null;
+      if (sysNode?.onaudioprocess) sysNode.onaudioprocess = null;
+    } catch {}
+    closeContext(ctxRef.current);
+    settleFlushWaiters();
+    micStreamRef.current = null;
+    sysStreamRef.current = null;
+    micNodeRef.current = null;
+    sysNodeRef.current = null;
+    keepRef.current = null;
+    ctxRef.current = null;
+  }, [settleFlushWaiters]);
+
   const start = useCallback(
     async ({ micId, sysId, systemAudioEnabled }) => {
+      const session = sessionRef.current;
+      const cancelled = () => session !== sessionRef.current;
+
       const ctx = new (window.AudioContext || window.webkitAudioContext)({
         sampleRate: CAPTURE_SAMPLE_RATE,
         latencyHint: "interactive",
       });
       ctxRef.current = ctx;
 
-      const micStream = await navigator.mediaDevices.getUserMedia(
-        microphoneConstraints(micId)
-      );
+      // Resolves null (after releasing the stream) when stop() won the race.
+      const acquire = async (source, constraints, ref) => {
+        let stream;
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(constraints);
+        } catch (err) {
+          throw new CaptureError(source, err);
+        }
+        if (cancelled()) {
+          stopTracks(stream);
+          return null;
+        }
+        ref.current = stream;
+        return stream;
+      };
+
+      let micStream;
       let sysStream = null;
-      if (systemAudioEnabled) {
-        sysStream = await navigator.mediaDevices.getUserMedia(
-          systemAudioConstraints(sysId)
-        );
+      try {
+        micStream = await acquire("mic", microphoneConstraints(micId), micStreamRef);
+        if (!micStream) return false;
+        if (systemAudioEnabled) {
+          sysStream = await acquire("system", systemAudioConstraints(sysId), sysStreamRef);
+          if (!sysStream) return false;
+        }
+      } catch (err) {
+        if (cancelled()) return false;
+        stop();
+        throw err;
       }
-      micStreamRef.current = micStream;
-      sysStreamRef.current = sysStream;
 
       const micSrc = ctx.createMediaStreamSource(micStream);
       const sysSrc = sysStream ? ctx.createMediaStreamSource(sysStream) : null;
@@ -65,6 +151,7 @@ export function useAudioCapture({ onChunk, workletUrl = PCM_WORKLET_URL }) {
 
       try {
         await ctx.audioWorklet.addModule(workletUrl);
+        if (cancelled()) return false;
         const micNode = new AudioWorkletNode(ctx, "pcm-worklet", {
           numberOfInputs: 1,
           numberOfOutputs: 0,
@@ -78,16 +165,18 @@ export function useAudioCapture({ onChunk, workletUrl = PCM_WORKLET_URL }) {
           })
           : null;
 
-        const onPort = (ev) => {
+        const listen = (node) => (ev) => {
           const { type, source, rms, buffer } = ev.data || {};
           if (type === "meter") {
             reportLevel(source, rms);
           } else if (type === "chunk" && buffer) {
             onChunkRef.current?.(source, buffer);
+          } else if (type === "flushed") {
+            settleFlushWaiters(node);
           }
         };
-        micNode.port.onmessage = onPort;
-        if (sysNode) sysNode.port.onmessage = onPort;
+        micNode.port.onmessage = listen(micNode);
+        if (sysNode) sysNode.port.onmessage = listen(sysNode);
 
         micSrc.connect(micNode);
         micSrc.connect(keep);
@@ -99,6 +188,7 @@ export function useAudioCapture({ onChunk, workletUrl = PCM_WORKLET_URL }) {
         micNodeRef.current = micNode;
         sysNodeRef.current = sysNode;
       } catch (err) {
+        if (cancelled()) return false;
         // Fallback for runtimes where the AudioWorklet cannot load.
         const micProc = ctx.createScriptProcessor(SCRIPT_PROCESSOR_FRAME, 1, 1);
         const sysProc = sysSrc
@@ -129,45 +219,40 @@ export function useAudioCapture({ onChunk, workletUrl = PCM_WORKLET_URL }) {
           await ctx.resume();
         } catch {}
       }
+      return !cancelled();
     },
-    [reportLevel, workletUrl]
+    [reportLevel, settleFlushWaiters, stop, workletUrl]
   );
 
-  // Asks each worklet to emit its partially filled batch.
+  // Asks each worklet to emit its partially filled batch and resolves once
+  // every worklet has acknowledged (its final chunk reaches onChunk first), or
+  // after flushTimeoutMs. Never rejects. The ScriptProcessor fallback holds no
+  // partial batch, so it resolves immediately.
   const flush = useCallback(() => {
-    try {
-      micNodeRef.current?.port?.postMessage({ type: "flush" });
-      sysNodeRef.current?.port?.postMessage({ type: "flush" });
-    } catch {}
-  }, []);
-
-  // Releases media tracks, detaches processing handlers, and closes the
-  // AudioContext. Idempotent: later calls find nothing left to release.
-  const stop = useCallback(() => {
-    try {
-      micStreamRef.current?.getTracks().forEach((t) => t.stop());
-    } catch {}
-    try {
-      sysStreamRef.current?.getTracks().forEach((t) => t.stop());
-    } catch {}
-    try {
-      const micNode = micNodeRef.current;
-      const sysNode = sysNodeRef.current;
-      if (micNode?.port) micNode.port.onmessage = null;
-      if (sysNode?.port) sysNode.port.onmessage = null;
-      if (micNode?.onaudioprocess) micNode.onaudioprocess = null;
-      if (sysNode?.onaudioprocess) sysNode.onaudioprocess = null;
-    } catch {}
-    try {
-      ctxRef.current?.close();
-    } catch {}
-    micStreamRef.current = null;
-    sysStreamRef.current = null;
-    micNodeRef.current = null;
-    sysNodeRef.current = null;
-    keepRef.current = null;
-    ctxRef.current = null;
-  }, []);
+    const nodes = [micNodeRef.current, sysNodeRef.current].filter((node) => node?.port);
+    if (nodes.length === 0) return Promise.resolve();
+    return new Promise((resolve) => {
+      let remaining = nodes.length;
+      const timer = setTimeout(resolve, flushTimeoutMs);
+      const acknowledge = () => {
+        remaining -= 1;
+        if (remaining === 0) {
+          clearTimeout(timer);
+          resolve();
+        }
+      };
+      const waiters = flushWaitersRef.current;
+      for (const node of nodes) {
+        if (!waiters.has(node)) waiters.set(node, []);
+        waiters.get(node).push(acknowledge);
+        try {
+          node.port.postMessage({ type: "flush" });
+        } catch {
+          settleFlushWaiters(node);
+        }
+      }
+    });
+  }, [flushTimeoutMs, settleFlushWaiters]);
 
   useEffect(
     () => () => {

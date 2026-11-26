@@ -40,7 +40,11 @@ class AuthManager {
           res.on("data", (d) => (buf += d));
           res.on("end", () => {
             if (res.statusCode !== 200) {
-              return reject(new Error(`Token HTTP ${res.statusCode}: ${buf}`));
+              return reject(
+                Object.assign(new Error(`Token HTTP ${res.statusCode}: ${buf}`), {
+                  statusCode: res.statusCode,
+                })
+              );
             }
             try {
               const json = JSON.parse(buf); // { token, expires_in }

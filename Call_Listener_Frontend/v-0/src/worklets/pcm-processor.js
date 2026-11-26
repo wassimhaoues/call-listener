@@ -12,7 +12,12 @@ class PCMWorklet extends AudioWorkletProcessor {
     this.pending = new Int16Array(this.batchSamples);
     this.pendingOffset = 0;
     this.port.onmessage = (event) => {
-      if (event.data?.type === "flush") this.flush();
+      if (event.data?.type === "flush") {
+        this.flush();
+        // Always acknowledge, even with nothing pending, so the renderer can
+        // stop waiting. Port ordering delivers the final chunk first.
+        this.port.postMessage({ type: "flushed", source: this.source });
+      }
     };
   }
 
