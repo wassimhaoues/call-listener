@@ -154,6 +154,12 @@ export function deriveStatus(state) {
   return state.isCapturing ? STATUS.LISTENING : STATUS.CONNECTED;
 }
 
+// The server bounds interim text to 500 characters; the client keeps the
+// newest part if a server sends more.
+export const MAX_INTERIM_CHARS = 500;
+const NO_INTERIM = Object.freeze({ candidate: "", interviewer: "" });
+const ROLE_BY_SPEAKER = Object.freeze({ you: "candidate", caller: "interviewer" });
+
 const baseState = {
   connection: CONNECTION.CONNECTING,
   isCapturing: false,
@@ -163,6 +169,9 @@ const baseState = {
   modelUnavailable: false,
   transcript: [],
   nextTranscriptId: 1,
+  // In-progress speech (opt-in `interim` capability): at most one line per
+  // speaker, replaced by that speaker's final transcript. Display-only.
+  interim: NO_INTERIM,
   currentQuestion: "",
   suggestion: "",
   model: null,
@@ -236,18 +245,47 @@ function toModelInfo(model) {
 // Server message handlers run in this fixed order on every incoming message.
 // One message can carry several fields; later handlers see earlier results.
 // Streamed generations are keyed by generation ID (see applyGenerationDelta).
+function withInterim(state, role, text) {
+  if (state.interim[role] === text) return state;
+  return { ...state, interim: { ...state.interim, [role]: text } };
+}
+
+function clearInterim(state) {
+  return state.interim === NO_INTERIM ? state : { ...state, interim: NO_INTERIM };
+}
+
+function toInterimText(text) {
+  const trimmed = text.trim();
+  return trimmed.length > MAX_INTERIM_CHARS
+    ? trimmed.slice(-MAX_INTERIM_CHARS).trimStart()
+    : trimmed;
+}
+
+// `{ interim: { speaker, text } }` replaces that speaker's in-progress line;
+// empty text clears it. Nothing is shown while paused, since no new audio
+// is being sent and late interim text would look like live speech.
+function applyInterim(state, message) {
+  const { interim } = message;
+  if (!interim || typeof interim !== "object") return state;
+  const role = Object.hasOwn(ROLE_BY_SPEAKER, interim.speaker ?? "")
+    ? ROLE_BY_SPEAKER[interim.speaker]
+    : null;
+  if (!role || typeof interim.text !== "string") return state;
+  if (state.isPaused) return state;
+  return withInterim(state, role, toInterimText(interim.text));
+}
+
 function applyTranscript(state, message) {
-  let next = state;
-  if (message.speaker === "you") {
-    next = appendTranscript(next, "candidate", message.transcript);
-  }
-  if (message.speaker === "caller") {
-    next = appendTranscript(next, "interviewer", message.transcript);
-    // Latest question wins: the newest interviewer utterance replaces the
-    // displayed question regardless of any in-flight guidance.
-    next = { ...next, currentQuestion: message.transcript };
-  }
-  return next;
+  const role = Object.hasOwn(ROLE_BY_SPEAKER, message.speaker ?? "")
+    ? ROLE_BY_SPEAKER[message.speaker]
+    : null;
+  if (!role) return state;
+  // The final transcript replaces the speaker's in-progress line.
+  const next = withInterim(appendTranscript(state, role, message.transcript), role, "");
+  if (role !== "interviewer") return next;
+  // Latest question wins: the newest interviewer utterance replaces the
+  // displayed question regardless of any in-flight guidance.
+  return { ...next, currentQuestion: message.transcript };
 }
 
 // Generation messages from streaming-capable servers carry `generation.id`;
@@ -428,6 +466,7 @@ function applySession(state, message) {
   return {
     ...state,
     ...(restarted ? IDLE_GENERATION : {}),
+    interim: replaced ? NO_INTERIM : state.interim,
     // The new session knows none of the old generation IDs.
     finalGenerationId: replaced ? null : state.finalGenerationId,
     pendingAction: replaced ? null : state.pendingAction,
@@ -443,6 +482,7 @@ function applyNotice(state, message) {
 
 const SERVER_MESSAGE_HANDLERS = [
   applySession,
+  applyInterim,
   applyTranscript,
   applyGenerationResult,
   applyGenerationThinking,
@@ -472,11 +512,14 @@ export function applyServerMessage(state, message) {
 function reduceFacts(state, action) {
   switch (action?.type) {
     case ACTION.CONNECTION_CHANGED:
+      // Any connection change (stop, drop, reconnect) ends in-progress speech
+      // lines: their final transcripts, if any, arrive as committed messages.
       // Once reconnection gives up, an in-flight generation can never finish.
       if (action.connection === CONNECTION.LOST && isGenerationInProgress(state)) {
         return {
           ...state,
           ...IDLE_GENERATION,
+          interim: NO_INTERIM,
           suggestion: "",
           finalGenerationId: null,
           connection: action.connection,
@@ -486,7 +529,7 @@ function reduceFacts(state, action) {
       // A requested action that had not started yet is answered (rejected or
       // failed) by the resume replay, or never: stop waiting for it.
       return {
-        ...state,
+        ...clearInterim(state),
         connection: action.connection,
         pendingAction: null,
         finalGenerationId: action.connection === CONNECTION.LOST ? null : state.finalGenerationId,
@@ -495,8 +538,9 @@ function reduceFacts(state, action) {
     case ACTION.CAPTURE_STARTED:
       return { ...state, isCapturing: true, notice: null };
     case ACTION.CAPTURE_FAILED:
+      // Capture ended: the session is stopped, so no speech is in progress.
       return {
-        ...state,
+        ...clearInterim(state),
         isCapturing: false,
         captureError: action.message || STATUS.CAPTURE_FAILED,
       };
@@ -527,7 +571,11 @@ function reduceFacts(state, action) {
       // generation replaces it (or a rejection explains why it did not run).
       return { ...state, pendingAction: action.actionType, actionError: "", notice: null };
     case ACTION.PAUSE_CHANGED:
-      return { ...state, isPaused: action.paused, notice: null };
+      return {
+        ...(action.paused ? clearInterim(state) : state),
+        isPaused: action.paused,
+        notice: null,
+      };
     case ACTION.AUDIO_CHUNK_DROPPED: {
       const droppedAudioChunks = state.droppedAudioChunks + 1;
       const reportCongestion =
