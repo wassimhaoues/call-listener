@@ -3,12 +3,15 @@ import { useNavigate } from "react-router-dom";
 import { useUI } from "@/ui/UIContext.jsx";
 import Button from "@/components/ui/Button.jsx";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card.jsx";
+import AiPreparationBrief from "@/components/AiPreparationBrief.jsx";
 import {
   buildEvidenceReferences,
   createPreparationBrief,
   extractCandidateFacts,
   extractJobRequirements,
   mergePreparationItems,
+  preparationEvidenceIndex,
+  aiPreparationErrorMessage,
 } from "@/services/preparation.js";
 
 function Labeled({ id, label, children }) {
@@ -88,6 +91,9 @@ export default function Context() {
   const [catalog, setCatalog] = useState(null);
   const [catalogFailed, setCatalogFailed] = useState(false);
   const [modelNotice, setModelNotice] = useState("");
+  // Model-backed brief: { status: "idle"|"loading"|"ready"|"error", result, context, error }.
+  const [aiBrief, setAiBrief] = useState({ status: "idle" });
+  const [showAiBrief, setShowAiBrief] = useState(false);
 
   useEffect(() => {
     const goIfOffline = () => {
@@ -147,11 +153,7 @@ export default function Context() {
     setSettings(({ model: _removed, ...rest }) => rest);
   }, [catalog, settings.model]);
 
-  function start() {
-    if (!candidate.name.trim() || !jobOffer.title.trim()) {
-      alert("Please provide your name and the job title.");
-      return;
-    }
+  function buildContext() {
     const preparedCandidate = {
       ...candidate,
       skills: listFromText(skillsText),
@@ -161,15 +163,47 @@ export default function Context() {
       ...jobOffer,
       requirements: listFromText(requirementsText),
     };
-    const context = {
+    return {
       version: 1,
       candidate: preparedCandidate,
       jobOffer: preparedJobOffer,
       evidence: buildEvidenceReferences(preparedJobOffer.requirements, preparedCandidate),
       settings: withoutEmptyModel(settings),
     };
-    localStorage.setItem("callContext", JSON.stringify(context));
+  }
+
+  function start() {
+    if (!candidate.name.trim() || !jobOffer.title.trim()) {
+      alert("Please provide your name and the job title.");
+      return;
+    }
+    localStorage.setItem("callContext", JSON.stringify(buildContext()));
     nav("/conversation");
+  }
+
+  // Sends the approved facts (never the pasted CV text) only on this click.
+  async function improveWithAi() {
+    if (!candidate.name.trim() || !jobOffer.title.trim()) {
+      setAiBrief((previous) => ({ ...previous, status: "error", error: "missing_basics" }));
+      return;
+    }
+    const context = buildContext();
+    setAiBrief((previous) => ({ ...previous, status: "loading", error: undefined }));
+    let response;
+    try {
+      response = await window.callApi?.generatePreparationBrief?.(context);
+    } catch {
+      response = { ok: false, error: "preparation_failed" };
+    }
+    if (response?.ok && response.brief) {
+      setAiBrief({ status: "ready", result: { brief: response.brief, model: response.model }, context });
+      setShowAiBrief(true);
+      return;
+    }
+    const error = response ? response.error : "preparation_unavailable";
+    // Keep any earlier AI brief available, but fall back to the local view.
+    setAiBrief((previous) => ({ ...previous, status: "error", error }));
+    setShowAiBrief(false);
   }
 
   function extractPreparationFacts() {
@@ -209,6 +243,8 @@ export default function Context() {
     setRequirementsText("");
     setEvidence([]);
     setBrief(null);
+    setAiBrief({ status: "idle" });
+    setShowAiBrief(false);
     setLegacyContext(null);
   }
 
@@ -304,14 +340,38 @@ export default function Context() {
                 <h2 className="font-semibold">Preparation references</h2>
                 <p className="text-sm text-[var(--text-2)]">Extract facts locally, then review the editable fields before starting.</p>
               </div>
-              <Button variant="secondary" onClick={extractPreparationFacts}>Extract facts locally</Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="secondary" onClick={extractPreparationFacts}>Extract facts locally</Button>
+                <Button variant="secondary" onClick={improveWithAi} disabled={aiBrief.status === "loading"}>
+                  {aiBrief.status === "loading" ? "Improving with AI…" : "Improve with AI"}
+                </Button>
+              </div>
             </div>
+            <p className="text-xs text-[var(--text-2)] mt-2">
+              Improve with AI sends your approved profile, skills, achievements, and the job offer to the AI model.
+              Pasted CV text is not sent. Nothing is sent until you click.
+            </p>
+            {aiBrief.status === "loading" && <p role="status" className="text-sm mt-2">Generating your AI brief…</p>}
+            {aiBrief.status === "error" && (
+              <p role="alert" className="text-sm text-[var(--danger)] mt-2">{aiPreparationErrorMessage(aiBrief.error)}</p>
+            )}
+            {aiBrief.result && (
+              <Button className="mt-2" variant="ghost" onClick={() => setShowAiBrief(!showAiBrief)}>
+                {showAiBrief ? "Show local brief" : "Show AI brief"}
+              </Button>
+            )}
             {evidence.length > 0 && (
               <ul className="text-sm mt-3 space-y-1">
                 {evidence.map((item) => <li key={`${item.requirement}-${item.evidence}`}>{item.requirement} → {item.evidence}</li>)}
               </ul>
             )}
-            {brief && (
+            {showAiBrief && aiBrief.result && (
+              <AiPreparationBrief
+                result={aiBrief.result}
+                evidenceIndex={preparationEvidenceIndex(aiBrief.context)}
+              />
+            )}
+            {!showAiBrief && brief && (
               <div className="grid md:grid-cols-2 gap-4 text-sm mt-4">
                 <div><h3 className="font-medium">Introduction outline</h3><ul>{brief.introduction.map((item) => <li key={item}>{item}</li>)}</ul></div>
                 <div><h3 className="font-medium">Questions to ask</h3><ul>{brief.questions.map((item) => <li key={item}>{item}</li>)}</ul></div>
