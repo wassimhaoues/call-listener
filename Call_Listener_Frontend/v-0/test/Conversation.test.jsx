@@ -276,3 +276,18 @@ it("falls back to typed questions when the interviewer monitor source disappears
   fireEvent.click(screen.getByRole("button", { name: "Ask" }));
   expect(ws.sentMessages).toContainEqual({ interviewer_question: "Tell me about a hard bug." });
 });
+
+it("reports an active interview to the main process while capturing, and clears it on stop", async () => {
+  const setInterviewActive = vi.fn();
+  window.callApi.setInterviewActive = setInterviewActive;
+  await renderConversation();
+  expect(setInterviewActive).toHaveBeenLastCalledWith(true);
+
+  const [micNode] = audio.workletNodes;
+  fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  await act(async () => {
+    micNode.port.onmessage({ data: { type: "flushed" } });
+  });
+  expect(screen.getByText("Setup page")).toBeInTheDocument();
+  expect(setInterviewActive).toHaveBeenLastCalledWith(false);
+});
