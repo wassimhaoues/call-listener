@@ -1,0 +1,131 @@
+{
+  "version": 1,
+  "id": "fr-data-julien",
+  "description": "Entretien synthétique en français pour un poste d'analyste BI ; réponses courtes. Les noms, entreprises et chiffres sont inventés.",
+  "context": {
+    "version": 1,
+    "candidate": {
+      "name": "Julien Marchetti",
+      "profile": "Analyste de données depuis cinq ans à la Coopérative Brisemer, spécialisé en reporting et en qualité des données.",
+      "skills": ["SQL", "Power BI", "Python", "Airflow"],
+      "achievements": [
+        "Industrialisé le reporting mensuel de la coopérative",
+        "Formé les équipes commerciales aux indicateurs"
+      ]
+    },
+    "jobOffer": {
+      "title": "Analyste BI senior",
+      "company": "Mutuelle Vallon",
+      "description": "Concevoir des tableaux de bord, fiabiliser les données clients et accompagner les équipes métier.",
+      "requirements": [
+        "Tableaux de bord",
+        "Qualité des données",
+        "Prévision",
+        "Communication",
+        "Automatisation"
+      ]
+    },
+    "settings": {
+      "language": "fr",
+      "transcriptionLanguage": "fr",
+      "stage": "behavioral",
+      "answerLength": "short"
+    }
+  },
+  "evidence": [
+    {
+      "id": "JULIEN-E1",
+      "requirement": "Tableaux de bord",
+      "evidence": "Conçu un tableau de bord Power BI suivi chaque semaine par 35 responsables d'agence",
+      "keyTerms": ["Power BI", "35 responsables"]
+    },
+    {
+      "id": "JULIEN-E2",
+      "requirement": "Qualité des données",
+      "evidence": "Réduit les doublons clients de 18 % grâce à des règles de rapprochement en SQL",
+      "keyTerms": ["doublons", "règles de rapprochement"]
+    },
+    {
+      "id": "JULIEN-E3",
+      "requirement": "Prévision",
+      "evidence": "Construit un modèle de prévision des ventes en Python avec une erreur moyenne de 7 %",
+      "keyTerms": ["modèle de prévision", "erreur moyenne"]
+    },
+    {
+      "id": "JULIEN-E4",
+      "requirement": "Communication",
+      "evidence": "Animé des ateliers mensuels pour former les équipes commerciales à la lecture des indicateurs",
+      "keyTerms": ["ateliers mensuels"]
+    },
+    {
+      "id": "JULIEN-E5",
+      "requirement": "Automatisation",
+      "evidence": "Automatisé le reporting mensuel avec Airflow, économisant deux jours de travail par mois",
+      "keyTerms": ["Airflow", "deux jours"]
+    }
+  ],
+  "expectations": {
+    "language": "fr",
+    "answerLength": "short",
+    "forbiddenClaims": [
+      "Maya Okafor",
+      "Larkspur",
+      "Sana Whitfield",
+      "Orchard Lane",
+      "Léa Fontaine",
+      "Sorel",
+      "Tableau Software",
+      "Google",
+      "Amazon",
+      "50 %"
+    ]
+  },
+  "questions": [
+    {
+      "id": "julien-q1",
+      "type": "behavioral",
+      "text": "Parlez-moi d'une situation où vous avez formé des équipes commerciales.",
+      "expectedEvidenceIds": ["JULIEN-E4"]
+    },
+    {
+      "id": "julien-q2",
+      "type": "technical",
+      "text": "Comment avez-vous amélioré la qualité des données clients ?",
+      "expectedEvidenceIds": ["JULIEN-E2"]
+    },
+    {
+      "id": "julien-q3",
+      "type": "multipart",
+      "text": "Comment construisez-vous un tableau de bord, et quel modèle de prévision avez-vous utilisé ?",
+      "expectedEvidenceIds": ["JULIEN-E1", "JULIEN-E3"]
+    },
+    {
+      "id": "julien-q4",
+      "type": "follow-up",
+      "history": [
+        { "speaker": "interviewer", "text": "Parlez-moi de votre travail sur le reporting mensuel." },
+        { "speaker": "candidate", "text": "J'ai automatisé une grande partie du reporting." }
+      ],
+      "text": "Et quel a été le gain concret ?",
+      "expectedEvidenceIds": ["JULIEN-E5"]
+    },
+    {
+      "id": "julien-q5",
+      "type": "no-evidence",
+      "text": "Avez-vous déjà géré un budget marketing ?",
+      "expectedEvidenceIds": []
+    },
+    {
+      "id": "julien-q6",
+      "type": "technical",
+      "text": "Quels outils utilisez-vous pour automatiser le reporting ?",
+      "expectedEvidenceIds": ["JULIEN-E5"]
+    },
+    {
+      "id": "julien-q7",
+      "type": "behavioral",
+      "text": "Racontez une fois où un tableau de bord a changé une décision.",
+      "expectedEvidenceIds": ["JULIEN-E1"]
+    }
+  ]
+}
