@@ -79,8 +79,15 @@ describe("floatToPcm16", () => {
 describe("interview message encoders", () => {
   it("encodes the documented client message shapes", () => {
     expect(JSON.parse(encodeContextMessage({ version: 1 }))).toEqual({
-      context: { version: 1 },
+      context: { version: 1, capabilities: ["stream"] },
     });
+    // Legacy contexts advertise the capability the same way; the caller's
+    // object is not mutated.
+    const legacy = { caller: { name: "Bob" } };
+    expect(JSON.parse(encodeContextMessage(legacy))).toEqual({
+      context: { caller: { name: "Bob" }, capabilities: ["stream"] },
+    });
+    expect(legacy).toEqual({ caller: { name: "Bob" } });
     expect(JSON.parse(encodeInterviewerQuestionMessage("Why?"))).toEqual({
       interviewer_question: "Why?",
     });

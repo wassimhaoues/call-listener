@@ -1,15 +1,76 @@
 import { ChatOpenRouter } from "@langchain/openrouter";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 
-function contentToText(content) {
-  if (typeof content === "string") return content.trim();
+// Only text parts are candidate-facing; reasoning and tool data live outside
+// `content` (or in non-text parts) and are never returned or streamed.
+function contentToRawText(content) {
+  if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
       .map((part) => typeof part === "string" ? part : part?.text || "")
-      .join("")
-      .trim();
+      .join("");
   }
   return "";
+}
+
+function contentToText(content) {
+  return contentToRawText(content).trim();
+}
+
+const USAGE_TOKEN_FIELDS = ["input_tokens", "output_tokens", "total_tokens"];
+
+// Sum token counts across streamed chunks, as LangChain's chunk `concat`
+// does. OpenRouter normally reports usage once, on the final chunk.
+function addUsage(total, usage) {
+  if (!usage || typeof usage !== "object") return total;
+  const next = { ...total };
+  let counted = false;
+  for (const field of USAGE_TOKEN_FIELDS) {
+    if (Number.isFinite(usage[field])) {
+      next[field] = (next[field] || 0) + usage[field];
+      counted = true;
+    }
+  }
+  return counted ? next : total;
+}
+
+function hasFields(value) {
+  return !!value && typeof value === "object" && Object.keys(value).length > 0;
+}
+
+/**
+ * Consume a LangChain chat-model stream, forwarding each text delta to
+ * `onToken`. No delta is forwarded once `signal` aborts (caller supersede,
+ * session end, or deadline); the abort reason is thrown instead.
+ */
+async function streamReply(client, messages, signal, onToken) {
+  const stream = await client.stream(messages, { signal });
+  let text = "";
+  let usage;
+  let metadataUsage;
+  let actual = null;
+  for await (const chunk of stream) {
+    if (signal.aborted) throw signal.reason ?? new Error("aborted");
+    const delta = contentToRawText(chunk?.content);
+    usage = addUsage(usage, chunk?.usage_metadata);
+    if (hasFields(chunk?.response_metadata?.usage)) metadataUsage = chunk.response_metadata.usage;
+    actual = actualModelFrom(chunk) || actual;
+    if (delta) {
+      text += delta;
+      onToken(delta);
+    }
+  }
+  if (signal.aborted) throw signal.reason ?? new Error("aborted");
+  return { text: text.trim(), usage: usage || metadataUsage, actual };
+}
+
+async function invokeReply(client, messages, signal) {
+  const response = await client.invoke(messages, { signal });
+  return {
+    text: contentToText(response.content),
+    usage: response.usage_metadata || response.response_metadata?.usage,
+    actual: actualModelFrom(response),
+  };
 }
 
 function withRequestDeadline(signal, timeoutMs) {
@@ -63,7 +124,14 @@ export function createOpenRouterReplyGenerator({
   const clients = new Map();
   const clientFor = (modelId) => {
     if (!clients.has(modelId)) {
-      clients.set(modelId, new ChatOpenRouterClass({ apiKey, model: modelId, maxTokens: maxOutputTokens }));
+      // `streamUsage` asks for token usage on streamed responses too, so the
+      // interview budget records reported (not estimated) cost when it can.
+      clients.set(modelId, new ChatOpenRouterClass({
+        apiKey,
+        model: modelId,
+        maxTokens: maxOutputTokens,
+        streamUsage: true,
+      }));
     }
     return clients.get(modelId);
   };
@@ -72,7 +140,7 @@ export function createOpenRouterReplyGenerator({
   return async function generateReply(
     systemPrompt,
     formattedHistory,
-    { signal, onUsage, onModel, model: requestedModel } = {}
+    { signal, onUsage, onModel, onToken, model: requestedModel } = {}
   ) {
     const selectedModel = requestedModel || model;
     if (allowed && !allowed.has(selectedModel)) {
@@ -83,18 +151,20 @@ export function createOpenRouterReplyGenerator({
     const deadline = withRequestDeadline(signal, requestTimeoutMs);
     try {
       log?.info(`Generating AI reply through OpenRouter model ${selectedModel}...`);
-      const response = await clientFor(selectedModel).invoke(
-        [new SystemMessage(systemPrompt), new HumanMessage(formattedHistory)],
-        { signal: deadline.signal }
-      );
-      const text = contentToText(response.content);
+      const messages = [new SystemMessage(systemPrompt), new HumanMessage(formattedHistory)];
+      const client = clientFor(selectedModel);
+      // Streaming is opt-in per request; without `onToken` the adapter keeps
+      // the single `invoke` call it has always made.
+      const { text, usage, actual } = typeof onToken === "function"
+        ? await streamReply(client, messages, deadline.signal, onToken)
+        : await invokeReply(client, messages, deadline.signal);
       // The character counts let the budget charge a conservative estimate
       // when the provider omits usage; they carry no transcript text.
-      await onUsage?.(response.usage_metadata || response.response_metadata?.usage, {
+      await onUsage?.(usage, {
         inputChars: String(systemPrompt ?? "").length + String(formattedHistory ?? "").length,
         outputChars: text.length,
       });
-      onModel?.({ selected: selectedModel, actual: actualModelFrom(response) });
+      onModel?.({ selected: selectedModel, actual });
       log?.info(`OpenRouter reply generated (${text.length} chars)`);
       return text;
     } catch (error) {

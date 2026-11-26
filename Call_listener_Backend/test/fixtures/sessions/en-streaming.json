@@ -1,0 +1,107 @@
+{
+  "id": "en-streaming-v1",
+  "description": "Synthetic English interview from a client that advertises the `stream` capability. Covers a non-streamed intro, a streamed answer with generation IDs, a streamed generation superseded after its tokens were buffered (no delta ever sent), a streamed answer without usage, a provider failure, and end while a stream is open.",
+  "harness": {},
+  "steps": [
+    {
+      "label": "streaming client context gets the usual (non-streamed) intro",
+      "type": "context",
+      "context": "validEn",
+      "capabilities": ["stream"],
+      "provider": "introSuccess",
+      "expect": [{ "ai_reply": "Open with your billing migration: scope, risk, and the zero-data-loss result.", "model": { "selected": "fixture/model", "actual": null } }]
+    },
+    { "label": "interviewer audio starts", "type": "audio", "source": "system", "bytes": 1920, "count": 1, "expect": [] },
+    { "label": "question 1 final", "type": "transcript", "source": "system", "text": "Tell me about a time you led a migration.", "isFinal": true, "expect": [] },
+    {
+      "label": "question 1 streams thinking, a coalesced delta, then done",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "streamedAnswer",
+      "expect": [
+        { "speaker": "caller", "transcript": "Tell me about a time you led a migration." },
+        { "generation": { "id": "g1", "state": "thinking" } },
+        { "generation": { "id": "g1", "state": "streaming" }, "delta": "Situation: a legacy billing database. Action: staged dual writes.  " },
+        { "ai_reply": "Situation: a legacy billing database. Action: staged dual writes.", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g1", "state": "done" } }
+      ]
+    },
+    { "label": "question 2 final", "type": "transcript", "source": "system", "text": "How did you keep the cutover safe?", "isFinal": true, "expect": [] },
+    {
+      "label": "question 2 streams tokens that stay buffered while the stream is open",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "streamThenHang",
+      "waitFor": "providerStreamed",
+      "expect": [
+        { "speaker": "caller", "transcript": "How did you keep the cutover safe?" },
+        { "generation": { "id": "g2", "state": "thinking" } }
+      ]
+    },
+    { "label": "question 3 final", "type": "transcript", "source": "system", "text": "What would you do differently next time?", "isFinal": true, "expect": [] },
+    {
+      "label": "question 3 supersedes question 2; its buffered tokens are dropped",
+      "type": "utteranceEnd",
+      "source": "system",
+      "provider": "streamedMissingUsage",
+      "expect": [
+        { "speaker": "caller", "transcript": "What would you do differently next time?" },
+        { "generation": { "id": "g3", "state": "thinking" } },
+        { "generation": { "id": "g3", "state": "streaming" }, "delta": "Rehearse the rollback earlier." },
+        { "ai_reply": "Rehearse the rollback earlier.", "model": { "selected": "fixture/model", "actual": null }, "generation": { "id": "g3", "state": "done" } }
+      ]
+    },
+    {
+      "label": "typed question hits a 429 and fails with its generation ID",
+      "type": "typed",
+      "text": "Why do you want to join this team?",
+      "provider": "rateLimited",
+      "expect": [
+        { "speaker": "caller", "transcript": "Why do you want to join this team?" },
+        { "generation": { "id": "g4", "state": "thinking" } },
+        { "generation": { "id": "g4", "state": "failed" }, "ai_reply": "[Erreur du modèle]" }
+      ]
+    },
+    {
+      "label": "closing question is still streaming at end",
+      "type": "typed",
+      "text": "Do you have any questions for us?",
+      "provider": "streamThenHang",
+      "waitFor": "providerStreamed",
+      "expect": [
+        { "speaker": "caller", "transcript": "Do you have any questions for us?" },
+        { "generation": { "id": "g5", "state": "thinking" } }
+      ]
+    },
+    { "label": "end aborts the open stream without any delta or reply", "type": "end", "expect": [] }
+  ],
+  "final": {
+    "streams": [
+      { "label": "system", "language": "en", "chunks": 1, "finishCalls": 1 }
+    ],
+    "storedTranscriptionLanguage": "en",
+    "history": [
+      ["caller", "Tell me about a time you led a migration."],
+      ["assistant", "Situation: a legacy billing database. Action: staged dual writes."],
+      ["caller", "How did you keep the cutover safe?"],
+      ["caller", "What would you do differently next time?"],
+      ["assistant", "Rehearse the rollback earlier."],
+      ["caller", "Why do you want to join this team?"],
+      ["caller", "Do you have any questions for us?"]
+    ],
+    "providerCalls": [
+      { "name": "introSuccess", "status": "resolved" },
+      { "name": "streamedAnswer", "status": "resolved" },
+      { "name": "streamThenHang", "status": "rejected" },
+      { "name": "streamedMissingUsage", "status": "resolved" },
+      { "name": "rateLimited", "status": "rejected" },
+      { "name": "streamThenHang", "status": "rejected" }
+    ],
+    "usage": [
+      { "input_tokens": 900, "output_tokens": 60, "total_tokens": 960 },
+      { "input_tokens": 1100, "output_tokens": 30, "total_tokens": 1130 },
+      null
+    ],
+    "spentUsd": 0.000508,
+    "estimatedUsage": ["streamedMissingUsage"]
+  }
+}

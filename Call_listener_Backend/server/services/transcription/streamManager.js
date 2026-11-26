@@ -52,8 +52,8 @@ export class StreamManager {
     this.ContextStore = ContextStore;
     this.generateReply = generateReply;
     this.buildPrompt = buildPrompt;
-    this.runInterviewWorkflow = runInterviewWorkflow || (async ({ context, history, signal, model, onModel, onUsage }) =>
-      this.generateReply(this.buildPrompt(context, "reply"), history, { signal, model, onModel, onUsage }));
+    this.runInterviewWorkflow = runInterviewWorkflow || (async ({ context, history, signal, model, onModel, onUsage, onToken }) =>
+      this.generateReply(this.buildPrompt(context, "reply"), history, { signal, model, onModel, onUsage, onToken }));
     this.Budget = Budget;
     this.log = log;
     this.streams = {};
@@ -73,6 +73,25 @@ export class StreamManager {
     this.questionVersion = 0;
     this.REPLY_COOLDOWN_MS = 800;
     this.AI_TIMEOUT_MS = 12_000;
+    // Streaming is opt-in per client (see setClientCapabilities). Deltas are
+    // coalesced and sent at most once per STREAM_FLUSH_MS.
+    this.streamingEnabled = false;
+    this.STREAM_FLUSH_MS = 50;
+    this.generationSequence = 0;
+  }
+
+  /** Apply the capabilities advertised by the latest accepted context. */
+  setClientCapabilities({ stream = false } = {}) {
+    this.streamingEnabled = stream === true;
+  }
+
+  sendToClient(payload, label = "message") {
+    if (this.wsClient?.readyState !== this.wsClient?.OPEN) return;
+    try {
+      this.wsClient.send(JSON.stringify(payload));
+    } catch (sendError) {
+      this.log.error(`❌ WS send ${label} failed [${this.sessionId}]: %o`, sendError);
+    }
   }
 
   async getOrCreate(label) {
@@ -212,6 +231,26 @@ export class StreamManager {
     this.isResponding = true;
     const generationController = new AbortController();
     this.activeGenerationController = generationController;
+    // Opaque and unique per session; clients only compare it for equality.
+    this.generationSequence += 1;
+    const generationId = `g${this.generationSequence}`;
+    // Pinned per generation: a capability change applies to the next one.
+    const streaming = this.streamingEnabled;
+    const isCurrent = () =>
+      !this.closed &&
+      !generationController.signal.aborted &&
+      sessionGeneration === this.generation &&
+      questionVersion === this.questionVersion;
+    const deltas = streaming
+      ? createDeltaBatcher({
+        flushMs: this.STREAM_FLUSH_MS,
+        isCurrent,
+        send: (delta) => this.sendToClient(
+          { generation: { id: generationId, state: "streaming" }, delta },
+          "delta"
+        ),
+      })
+      : null;
     try {
       const contextObj = await this.ContextStore.get(this.sessionId);
       const budget = this.Budget
@@ -228,7 +267,9 @@ export class StreamManager {
       let modelInfo = null;
       const historyStr = await this.ChatHistory.toPrompt(this.sessionId);
       if (this.wsClient?.readyState === this.wsClient.OPEN) {
-        this.wsClient.send(JSON.stringify({ generation: { state: "thinking" } }));
+        this.wsClient.send(JSON.stringify({
+          generation: streaming ? { id: generationId, state: "thinking" } : { state: "thinking" },
+        }));
       }
       const aiText = await withTimeout(
         this.runInterviewWorkflow({
@@ -238,6 +279,7 @@ export class StreamManager {
           onUsage: (usage, estimateBasis) => this.Budget?.recordUsage(this.sessionId, usage, estimateBasis),
           model: selectedModel,
           onModel: (info) => { modelInfo = info; },
+          onToken: deltas ? (token) => deltas.push(token) : undefined,
         }),
         this.AI_TIMEOUT_MS,
         generationController,
@@ -250,20 +292,21 @@ export class StreamManager {
         questionVersion !== this.questionVersion
       ) return;
       if (!finalText) {
-        sendGenerationFailure(this.wsClient);
+        deltas?.cancel();
+        sendGenerationFailure(this.wsClient, streaming ? generationId : undefined);
         return;
       }
       await this.ChatHistory.push(this.sessionId, "assistant", finalText);
       if (this.closed || sessionGeneration !== this.generation || questionVersion !== this.questionVersion) return;
-      if (this.wsClient?.readyState === this.wsClient.OPEN) {
-        try {
-          this.wsClient.send(JSON.stringify(
-            modelInfo ? { ai_reply: finalText, model: modelInfo } : { ai_reply: finalText }
-          ));
-        } catch (sendError) {
-          this.log.error(`❌ WS send failed [${this.sessionId}]: %o`, sendError);
-        }
-      }
+      // Deliver any coalesced tail before the terminal message so deltas are
+      // never reordered after `done`.
+      deltas?.flush();
+      deltas?.cancel();
+      const reply = modelInfo ? { ai_reply: finalText, model: modelInfo } : { ai_reply: finalText };
+      this.sendToClient(
+        streaming ? { ...reply, generation: { id: generationId, state: "done" } } : reply,
+        "reply"
+      );
     } catch (error) {
       const superseded = generationController.signal.aborted && questionVersion !== this.questionVersion;
       if (!superseded) {
@@ -274,8 +317,10 @@ export class StreamManager {
         !this.closed &&
         sessionGeneration === this.generation &&
         questionVersion === this.questionVersion
-      ) sendGenerationFailure(this.wsClient);
+      ) sendGenerationFailure(this.wsClient, streaming ? generationId : undefined);
     } finally {
+      // Terminal for this generation: drop any buffered tail and its timer.
+      deltas?.cancel();
       if (this.activeGenerationController === generationController) {
         this.activeGenerationController = null;
       }
@@ -366,11 +411,56 @@ function sendBudgetError(wsClient) {
   } catch {}
 }
 
-function sendGenerationFailure(wsClient) {
+/**
+ * Coalesce streamed tokens into deltas sent at most once per `flushMs`.
+ * Nothing is sent once the generation stops being current (superseded,
+ * aborted, ended, or closed) or after `cancel()`.
+ */
+export function createDeltaBatcher({ flushMs, isCurrent, send }) {
+  let buffer = "";
+  let timer = null;
+  let cancelled = false;
+
+  function cancel() {
+    cancelled = true;
+    clearTimeout(timer);
+    timer = null;
+    buffer = "";
+  }
+
+  function flush() {
+    clearTimeout(timer);
+    timer = null;
+    if (cancelled || !buffer) return;
+    if (!isCurrent()) {
+      cancel();
+      return;
+    }
+    const delta = buffer;
+    buffer = "";
+    send(delta);
+  }
+
+  return {
+    push(token) {
+      if (cancelled || typeof token !== "string" || !token) return;
+      if (!isCurrent()) {
+        cancel();
+        return;
+      }
+      buffer += token;
+      if (!timer) timer = setTimeout(flush, flushMs);
+    },
+    flush,
+    cancel,
+  };
+}
+
+function sendGenerationFailure(wsClient, generationId) {
   if (wsClient?.readyState !== wsClient?.OPEN) return;
   try {
     wsClient.send(JSON.stringify({
-      generation: { state: "failed" },
+      generation: generationId ? { id: generationId, state: "failed" } : { state: "failed" },
       // Retained for older desktop clients that only understand final replies.
       ai_reply: "[Erreur du modèle]",
     }));

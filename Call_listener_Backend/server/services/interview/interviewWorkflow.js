@@ -18,6 +18,8 @@ export function createInterviewWorkflow({ buildPrompt, generateReply } = {}) {
     onUsage: Annotation({ default: () => undefined }),
     model: Annotation({ default: () => undefined }),
     onModel: Annotation({ default: () => undefined }),
+    // Optional: when set, the reply generator streams text deltas to it.
+    onToken: Annotation({ default: () => undefined }),
     selectedEvidence: Annotation({ default: () => [] }),
     suggestion: Annotation({ default: () => "" }),
   });
@@ -32,6 +34,7 @@ export function createInterviewWorkflow({ buildPrompt, generateReply } = {}) {
         onUsage: state.onUsage,
         model: state.model,
         onModel: state.onModel,
+        onToken: state.onToken,
       });
       return { suggestion: (suggestion || "").trim() };
     })

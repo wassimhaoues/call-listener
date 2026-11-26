@@ -78,3 +78,24 @@ export function parseInterviewContext(value) {
 export function isCandidateInterviewContext(value) {
   return CandidateInterviewContextSchema.safeParse(value).success;
 }
+
+/**
+ * Optional client capabilities advertised at the top level of a context
+ * message (`context.capabilities`). They describe the connected client, not
+ * the interview, so they are parsed separately and never stored with the
+ * context or sent to a model (both context schemas strip the key). Unknown
+ * capability names are ignored so newer clients can talk to older servers; a
+ * malformed list is rejected.
+ */
+export const CLIENT_CAPABILITIES = Object.freeze(["stream"]);
+
+const ClientCapabilitiesSchema = z.array(text(32).min(1)).max(8).optional();
+
+/** @returns {{ stream: boolean }} */
+export function parseClientCapabilities(value) {
+  const raw = value && typeof value === "object" && !Array.isArray(value)
+    ? value.capabilities
+    : undefined;
+  const capabilities = ClientCapabilitiesSchema.parse(raw) ?? [];
+  return { stream: capabilities.includes("stream") };
+}

@@ -16,6 +16,7 @@ export default function LiveGuidancePanel({
   evidence = [],
   onSubmitTypedQuestion,
   isThinking = false,
+  isStreaming = false,
   model = null,
   alerts = [],
 }) {
@@ -50,16 +51,23 @@ export default function LiveGuidancePanel({
       </section>
       <section>
         <h2 className="text-sm font-semibold">Suggested answer</h2>
-        <div className="prose prose-sm max-w-none mt-1">
+        <div className="prose prose-sm max-w-none mt-1" aria-busy={isStreaming || undefined}>
           {isThinking ? (
             <p className="text-[var(--text-2)]" role="status">
               Preparing guidance for this question…
             </p>
           ) : (
+            // Streamed text is partial model output: rendered as plain text
+            // like the final reply, and replaced by it on completion.
             <SuggestionText text={suggestion} />
           )}
         </div>
-        {!isThinking && modelLabel && (
+        {isStreaming && (
+          <p className="mt-1 text-xs text-[var(--text-2)]" role="status">
+            Still writing…
+          </p>
+        )}
+        {!isThinking && !isStreaming && modelLabel && (
           <p className="mt-1 text-xs text-[var(--text-2)]">{modelLabel}</p>
         )}
       </section>
