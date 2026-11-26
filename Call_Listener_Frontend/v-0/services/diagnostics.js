@@ -7,6 +7,14 @@
 
 const OS_FAMILIES = { win32: "Windows", linux: "Linux", darwin: "macOS" };
 
+// Kind of interviewer source the candidate chose in Setup. Only the kind is
+// accepted, never a device ID or label (labels can contain host details).
+const INTERVIEWER_SOURCES = {
+  "monitor-source": "Monitor source selected",
+  "vb-cable": "VB-Cable",
+  none: "None (typed questions)",
+};
+
 const CAPTURE_STRATEGIES = {
   "system-and-microphone": "System audio and microphone (VB-Cable)",
   "microphone-only": "Microphone only",
@@ -48,8 +56,8 @@ const ERROR_CATALOG = {
   },
   "system-audio-unavailable": {
     severity: "info",
-    message: "Interviewer (system) audio capture is not available on Linux yet.",
-    action: "Continue in microphone-only mode and type the interviewer's questions.",
+    message: "Automatic interviewer (system) audio capture is not available on Linux yet.",
+    action: "Choose a system output monitor source in Setup, or continue in microphone-only mode and type the interviewer's questions.",
   },
 };
 
@@ -89,6 +97,7 @@ function describeError(code) {
  * @param {object} input.audio           platformAudio.describe() result
  * @param {string} [input.appVersion]
  * @param {string} [input.electronVersion]
+ * @param {string} [input.interviewerSource] kind chosen in Setup (enum only)
  */
 function buildDiagnostics({
   platform,
@@ -98,18 +107,24 @@ function buildDiagnostics({
   audio = {},
   appVersion,
   electronVersion,
+  interviewerSource,
 } = {}) {
   const appSupported = Boolean(capabilities?.appSupported);
   const strategyKey = CAPTURE_STRATEGIES[audio.captureStrategy]
     ? audio.captureStrategy
     : "unavailable";
 
+  const sourceKey = Object.hasOwn(INTERVIEWER_SOURCES, interviewerSource)
+    ? interviewerSource
+    : "unknown";
+  const monitorSelected = sourceKey === "monitor-source";
+
   const codes = [];
   if (!appSupported) codes.push("unsupported-platform");
   if (audio.lastErrorCode && !codes.includes(audio.lastErrorCode)) {
     codes.push(audio.lastErrorCode);
   }
-  if (appSupported && strategyKey === "microphone-only") {
+  if (appSupported && strategyKey === "microphone-only" && !monitorSelected) {
     codes.push("system-audio-unavailable");
   }
 
@@ -124,6 +139,10 @@ function buildDiagnostics({
       strategy: strategyKey,
       label: CAPTURE_STRATEGIES[strategyKey],
       systemAudio: Boolean(audio.systemAudioAvailable),
+      interviewerSource: {
+        kind: sourceKey,
+        label: INTERVIEWER_SOURCES[sourceKey] ?? "Not chosen yet",
+      },
     },
     audioAdapter: {
       kind: safeToken(audio.kind),

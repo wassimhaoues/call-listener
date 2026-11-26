@@ -36,8 +36,14 @@ function closeContext(ctx) {
 // it (anything acquired late is released), and rejects with a CaptureError
 // naming the failing source when getUserMedia fails (after releasing
 // everything it acquired).
+//
+// If the interviewer (system) device disappears mid-interview (its track
+// ends, e.g. a PipeWire monitor source removed with its output device), only
+// that source is released and `onSourceLost("system")` is called once. The
+// microphone keeps capturing; nothing is synthesised for the lost source.
 export function useAudioCapture({
   onChunk,
+  onSourceLost,
   workletUrl = PCM_WORKLET_URL,
   flushTimeoutMs = FLUSH_TIMEOUT_MS,
 }) {
@@ -45,6 +51,8 @@ export function useAudioCapture({
 
   const onChunkRef = useRef(onChunk);
   onChunkRef.current = onChunk;
+  const onSourceLostRef = useRef(onSourceLost);
+  onSourceLostRef.current = onSourceLost;
   // Bumped by stop(); a start() still awaiting devices sees it and backs out.
   const sessionRef = useRef(0);
   const ctxRef = useRef(null);
@@ -53,6 +61,9 @@ export function useAudioCapture({
   const sysStreamRef = useRef(null);
   const micNodeRef = useRef(null);
   const sysNodeRef = useRef(null);
+  const sysSrcRef = useRef(null);
+  // Detaches the system track "ended" listener of the current session.
+  const sysEndedCleanupRef = useRef(null);
   // Worklet node -> callbacks waiting for its "flushed" acknowledgement.
   const flushWaitersRef = useRef(new Map());
 
@@ -78,6 +89,8 @@ export function useAudioCapture({
   // AudioContext. Idempotent: later calls find nothing left to release.
   const stop = useCallback(() => {
     sessionRef.current += 1;
+    sysEndedCleanupRef.current?.();
+    sysEndedCleanupRef.current = null;
     stopTracks(micStreamRef.current);
     stopTracks(sysStreamRef.current);
     try {
@@ -94,9 +107,48 @@ export function useAudioCapture({
     sysStreamRef.current = null;
     micNodeRef.current = null;
     sysNodeRef.current = null;
+    sysSrcRef.current = null;
     keepRef.current = null;
     ctxRef.current = null;
   }, [settleFlushWaiters]);
+
+  // Releases only the interviewer (system) source after its device was lost:
+  // stops its tracks, disconnects its graph branch, and silences its meter.
+  const releaseSystemSource = useCallback(() => {
+    sysEndedCleanupRef.current?.();
+    sysEndedCleanupRef.current = null;
+    const node = sysNodeRef.current;
+    stopTracks(sysStreamRef.current);
+    try {
+      sysSrcRef.current?.disconnect?.();
+      if (node?.port) node.port.onmessage = null;
+      if (node?.onaudioprocess) node.onaudioprocess = null;
+      node?.disconnect?.();
+    } catch {}
+    if (node) settleFlushWaiters(node);
+    sysStreamRef.current = null;
+    sysSrcRef.current = null;
+    sysNodeRef.current = null;
+    setLevels((current) => ({ ...current, system: SILENT_LEVEL }));
+  }, [settleFlushWaiters]);
+
+  // Watches the system tracks for an "ended" event (device removed or
+  // revoked). track.stop() does not fire "ended", so stop() never triggers it.
+  const watchSystemTracks = useCallback(
+    (stream, session) => {
+      const tracks = stream?.getTracks?.() || [];
+      const onEnded = () => {
+        if (session !== sessionRef.current || !sysStreamRef.current) return;
+        releaseSystemSource();
+        onSourceLostRef.current?.("system");
+      };
+      tracks.forEach((track) => track.addEventListener?.("ended", onEnded));
+      sysEndedCleanupRef.current = () =>
+        tracks.forEach((track) => track.removeEventListener?.("ended", onEnded));
+      return tracks.length > 0 && tracks.every((track) => track.readyState === "ended");
+    },
+    [releaseSystemSource]
+  );
 
   const start = useCallback(
     async ({ micId, sysId, systemAudioEnabled }) => {
@@ -142,6 +194,7 @@ export function useAudioCapture({
 
       const micSrc = ctx.createMediaStreamSource(micStream);
       const sysSrc = sysStream ? ctx.createMediaStreamSource(sysStream) : null;
+      sysSrcRef.current = sysSrc;
 
       // A muted sink keeps the graph pulling audio without audible playback.
       const keep = ctx.createGain();
@@ -219,9 +272,15 @@ export function useAudioCapture({
           await ctx.resume();
         } catch {}
       }
-      return !cancelled();
+      if (cancelled()) return false;
+      // A device removed while the graph was being built has already ended.
+      if (sysStream && watchSystemTracks(sysStream, session)) {
+        releaseSystemSource();
+        onSourceLostRef.current?.("system");
+      }
+      return true;
     },
-    [reportLevel, settleFlushWaiters, stop, workletUrl]
+    [releaseSystemSource, reportLevel, settleFlushWaiters, stop, watchSystemTracks, workletUrl]
   );
 
   // Asks each worklet to emit its partially filled batch and resolves once
