@@ -14,8 +14,9 @@ The server checks each frame in this order and handles the first match: `resume`
 | Typed interviewer question | `{ "interviewer_question": "..." }` | Fallback when interviewer (system) audio is unavailable, e.g. Linux microphone-only mode. The text is trimmed and must be 1–2,000 characters, otherwise the frame is answered with `{ "error": "Invalid message" }`. The server treats it exactly like a final interviewer utterance: it is stored in history, echoed back as a `caller` transcript, and, if it is classified as a question, scheduled for generation (latest question wins). Ignored after `end`. |
 | Response action | `{ "action": { "type": "regenerate"|"shorten"|"expand"|"clarify", "generationId": "g7" } }` | Asks for a new generation from the current suggestion. `generationId` must be the ID of the latest generation for the current interviewer question (1–64 characters); no other fields are allowed. A malformed frame (unknown type, missing or oversized ID, extra fields) receives `{ "error": "Invalid message" }`; a well-formed one that cannot run receives `{ "error": "action_rejected", "reason": "..." }`. Ignored after `end`. See [Response actions](#response-actions). |
 | End | `{ "end": true }` | Stops the active transcription streams and any in-flight generation; later utterances and late replies are suppressed. For a resume-capable session it also purges the session immediately (no resume window). |
+| End with debrief | `{ "end": { "debrief": true } }` | Debrief-capable clients only (see [Unsaved debrief](#unsaved-debrief)). Stops capture and model work like `{ "end": true }`, then generates one review of the interview, sends `{ "debrief": ... }`, and purges. The `end` object may contain only a boolean `debrief`; anything else (for example `{ "end": { "debrief": "yes" } }`) receives `{ "error": "Invalid message" }` and does not end the session. Without the `debrief` capability, or with `debrief: false`, it is a plain end. |
 
-The desktop client stops a session in this order: ask each audio worklet to flush its partial batch, wait (at most 250 ms) for that final audio chunk and send it, send `{ "end": true }`, then close the socket.
+The desktop client stops a session in this order: ask each audio worklet to flush its partial batch, wait (at most 250 ms) for that final audio chunk and send it, send `{ "end": true }`, then close the socket. **Stop and review** sends `{ "end": { "debrief": true } }` instead and closes the socket only after the `debrief` message arrives (or after 45 s).
 
 ## Server messages
 
@@ -35,6 +36,7 @@ The desktop client stops a session in this order: ask each audio worklet to flus
 | Resumed | `{ "resumed": { "sessionId": "...", "seq": 42, "truncated"?: true } }` | Answer to a successful `resume`, sent after the replayed messages. `seq` is the latest sequence number the session has assigned. `truncated: true` means some committed messages after `lastSeq` were evicted from the replay buffer. |
 | Notice | `{ "notice": "audio_gap" }` | Sent after `resumed`: audio captured while the client was disconnected never reached the server and was not transcribed. |
 | Resume failed | `{ "error": "resume_expired" }` or `{ "error": "resume_rejected" }` | Answer to a `resume` that cannot be honoured. The socket stays open as a new connection; send a context to start a new session. |
+| Debrief | `{ "debrief": { "status": "ready", "review": { ... } } }` or `{ "debrief": { "status": "failed"|"skipped", "reason": "..." } }` | Answer to `{ "end": { "debrief": true } }`, sent once, before the session is purged. Never sent after the socket closed. See [Unsaved debrief](#unsaved-debrief). In a resume-capable session it carries a `seq` but is not replayed. |
 
 Audio messages are JSON, not binary WebSocket frames. The server parses every frame as JSON and accepts only `mic` and `system` source labels. Invalid or malformed messages receive `{ "error": "Invalid message" }` while the socket remains available. Send context before audio so suggestions include it, and send `end` before an intentional shutdown.
 
@@ -99,6 +101,63 @@ An action that cannot run is answered with `{ "error": "action_rejected", "reaso
 
 Actions are charged to the interview budget like any generation. When the budget is spent, an action is answered with `{ "error": "interview_budget_reached" }` instead.
 
+## Unsaved debrief
+
+At the end of an interview the candidate can ask for a review of it. It is opt-in twice: the client lists `"debrief"` in the context `capabilities` (the desktop client sends `["stream", "resume", "debrief"]`), and it ends with `{ "end": { "debrief": true } }`. Like other capabilities, the most recently accepted context decides. `{ "end": true }` is unchanged for every client.
+
+On a debrief end the server:
+
+1. stops the transcription streams and any generation, exactly like `{ "end": true }`;
+2. unless the interview budget is spent or nothing was said, runs **one** model generation over the session's stored transcript (interviewer and candidate lines as spoken; the AI suggestions shown during the interview are passed separately, labelled as suggestions, never as things the candidate said), with at most one repair attempt when the output does not match the schema;
+3. sends `{ "debrief": ... }`;
+4. purges the session as it does today (a resume-capable session is purged immediately; an ordinary session when its socket closes).
+
+If the socket closes while the debrief is being prepared, the model request is aborted, nothing is sent, and the session is purged (a resume-capable session gets no resume window). Further `end` frames during the preparation are ignored.
+
+A ready debrief:
+
+```json
+{
+  "debrief": {
+    "status": "ready",
+    "review": {
+      "questionsCovered": [
+        { "question": "Tell me about a migration you led.", "candidateAnswerSummary": "You described moving billing to PostgreSQL.", "evidenceUsed": ["evidence-1"] }
+      ],
+      "strengths": ["You named a concrete system."],
+      "improvementTopics": [
+        { "topic": "Close with the result", "why": "The zero-data-loss outcome was not mentioned.", "practiceSuggestion": "End each story with one measurable result." }
+      ],
+      "followUpDraft": "Thank you for the conversation about the role."
+    }
+  }
+}
+```
+
+| Field | Bounds |
+| --- | --- |
+| `questionsCovered` | At most 12; `question` ≤ 300 characters, `candidateAnswerSummary` ≤ 600, `evidenceUsed` ≤ 3 IDs. |
+| `evidenceUsed` | IDs of the context's `evidence` entries: `evidence-N` is the N-th entry (1-based). Unknown IDs are removed. Legacy contexts have none. |
+| `strengths` | At most 5, each ≤ 300 characters. |
+| `improvementTopics` | At most 5; `topic` ≤ 120, `why` ≤ 400, `practiceSuggestion` ≤ 400 characters. |
+| `followUpDraft` | ≤ 2,000 characters; may be empty. A draft for the candidate to edit and send themselves; the server never sends it anywhere. |
+
+Over-long values are clipped. No other field is ever present: the review contains no score, ranking, or hiring prediction. All values are untrusted model output and must be rendered as plain text.
+
+| `status` / `reason` | When |
+| --- | --- |
+| `skipped` / `budget_reached` | The interview budget was already spent; no model call was made. |
+| `skipped` / `empty_transcript` | No interviewer or candidate line was transcribed; no model call was made. |
+| `failed` / `invalid_output` | The output did not match the schema after the repair attempt (or the budget ran out before it). |
+| `failed` / `timeout` | The debrief took longer than 30 s in total. |
+| `failed` / `generation_failed` | The provider request failed. |
+
+Cost: each model request is charged to the interview budget like any other, with an output cap of 1,500 tokens; at most two requests (generation and repair) per debrief.
+
+Privacy: the review is not stored. It exists only in the `debrief` message; the transcript, context, and budget are purged right after. Saving reviews is not implemented.
+
+Compatibility: servers older than this feature ignore the `debrief` capability and treat `{ "end": { "debrief": true } }` as a plain end without answering, so a client must time out its wait (the desktop client waits 45 s, then reports that no review arrived).
+
 ## Resumable sessions
 
 Resume is opt-in, like streaming. A client advertises it by listing `"resume"` in the context's `capabilities` array (the desktop client sends `["stream", "resume"]`). Once a session has accepted such a context, resume stays on for that session's lifetime, even if a later context omits `"resume"`, because the client depends on the sequence numbers. Clients that never send `"resume"` get exactly the behavior described above: no `seq`, no `session` message, and the session is purged as soon as the socket closes.
@@ -110,7 +169,7 @@ Resume is opt-in, like streaming. A client advertises it by listing `"resume"` i
 
 ### States
 
-`active` → (socket closes) → `disconnected` → (resume) → `active`, or → (resume window elapses) → `expired`. `{ "end": true }` moves an active session to `ended`. Ended and expired sessions are purged (chat history, context, and budget, as before) and can no longer be resumed.
+`active` → (socket closes) → `disconnected` → (resume) → `active`, or → (resume window elapses) → `expired`. `{ "end": true }` moves an active session to `ended`; `{ "end": { "debrief": true } }` does so after the debrief is sent, and a socket close while it is prepared ends (and purges) the session instead of disconnecting it. Ended and expired sessions are purged (chat history, context, and budget, as before) and can no longer be resumed.
 
 When the socket of a resume-capable session closes without `end`, the server:
 
