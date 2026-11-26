@@ -1,12 +1,25 @@
 /**
- * In-memory subset of the ioredis API used by the session stores and the
- * interview and preparation budgets. Enough to run the real adapters without a Redis server.
+ * In-memory subset of the ioredis API used by the session stores, the
+ * interview and preparation budgets, and WebSocket tickets. Enough to run the
+ * real adapters without a Redis server.
+ *
+ * `SET ... EX` records a deadline on the injectable clock `now()` (ms); GET and
+ * GETDEL treat a string past its deadline as missing, like Redis expiry.
  */
-export function createMemoryRedis() {
+export function createMemoryRedis({ now = () => Date.now() } = {}) {
   const strings = new Map();
   const lists = new Map();
   const hashes = new Map();
   const ttls = new Map();
+  const deadlines = new Map();
+
+  function dropIfExpired(key) {
+    if (deadlines.has(key) && now() >= deadlines.get(key)) {
+      strings.delete(key);
+      deadlines.delete(key);
+      ttls.delete(key);
+    }
+  }
 
   function normalizeIndex(index, length) {
     return index < 0 ? Math.max(0, length + index) : index;
@@ -15,11 +28,25 @@ export function createMemoryRedis() {
   return {
     ttls,
     async get(key) {
+      dropIfExpired(key);
       return strings.has(key) ? strings.get(key) : null;
+    },
+    async getdel(key) {
+      dropIfExpired(key);
+      if (!strings.has(key)) return null;
+      const value = strings.get(key);
+      strings.delete(key);
+      ttls.delete(key);
+      deadlines.delete(key);
+      return value;
     },
     async set(key, value, mode, seconds) {
       strings.set(key, String(value));
-      if (mode === "EX") ttls.set(key, seconds);
+      deadlines.delete(key);
+      if (mode === "EX") {
+        ttls.set(key, seconds);
+        deadlines.set(key, now() + seconds * 1000);
+      }
       return "OK";
     },
     async del(key) {

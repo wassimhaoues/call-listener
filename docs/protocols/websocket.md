@@ -1,6 +1,8 @@
 # WebSocket Protocol
 
-The desktop client connects to `wss://<host>/ws` after obtaining a token from the HTTP API. Chromium supplies the `call_token` secure cookie, keeping the bearer token out of renderer-visible URLs and URL logs. The backend temporarily accepts `?token=<jwt>` for legacy clients only. A connection without a token closes with code `4001` and reason `auth_required`; an invalid token closes with `4001` and `auth_failed`. A connection receives heartbeat pings every 30 seconds; clients should allow normal WebSocket pong handling.
+The desktop client connects to `wss://<host>/ws?ticket=<ticket>` with a short-lived, single-use ticket it requests from `POST /ws-ticket` (authenticated by the `call_token` cookie) just before each connection attempt, so the long-lived JWT never authenticates the socket or appears in a URL. A ticket is valid for `WS_TICKET_TTL_SECONDS` (default 30 s) and for one handshake only; it is bound to the cookie's `app_id` and `device_id`, which become the connection owner. When `ticket` is present the server ignores any cookie or `?token=`. An unknown, expired, reused, or malformed ticket closes with code `4001` and reason `auth_failed`; if the server cannot check the ticket (Redis unavailable) it closes with `1011` and `auth_unavailable`.
+
+For compatibility, while `WS_ALLOW_COOKIE_AUTH` is `true` (the default) a connection without a ticket is still authenticated by the `call_token` cookie (or the legacy `?token=<jwt>`). A connection without any credential closes with `4001` and `auth_required`; an invalid token closes with `4001` and `auth_failed`. With `WS_ALLOW_COOKIE_AUTH=false` a connection without a ticket closes with `4001` and `auth_required`. See [Backend authentication](../backend.md#websocket-tickets) for the plan to turn the cookie path off. A connection receives heartbeat pings every 30 seconds; clients should allow normal WebSocket pong handling.
 
 ## Client messages
 
@@ -194,7 +196,7 @@ Resume is opt-in, like streaming. A client advertises it by listing `"resume"` i
 ### Session identity and ownership
 
 - Session IDs are 128 random bits encoded as 22 base64url characters. They are opaque: compare them only for equality. Redis keys keep their names (`chat:<id>`, `context:<id>`).
-- A session is bound to the authenticated owner that created it: the `app_id` and `device_id` claims of the connection's JWT. A resume with a valid token for another device answers `{ "error": "resume_rejected" }`. The target session is not changed, nothing is replayed, and the socket stays open so the client can start a new session on it. The server does not close the socket, so a client can treat `resume_rejected` exactly like `resume_expired`.
+- A session is bound to the authenticated owner that created it: the `app_id` and `device_id` claims of the connection's ticket (or, on the cookie path, its JWT). A resume authenticated for another device answers `{ "error": "resume_rejected" }`. The target session is not changed, nothing is replayed, and the socket stays open so the client can start a new session on it. The server does not close the socket, so a client can treat `resume_rejected` exactly like `resume_expired`.
 
 ### States
 

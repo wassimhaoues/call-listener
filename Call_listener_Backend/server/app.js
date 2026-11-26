@@ -2,6 +2,7 @@ import express from "express";
 import jwt from "jsonwebtoken";
 import cookieParser from "cookie-parser";
 import { createFixedWindowLimiter } from "./core/rateLimit.js";
+import { createWsTicketStore, DEFAULT_WS_TICKET_TTL_SECONDS } from "./services/auth/wsTicketStore.js";
 
 /**
  * Create the HTTP API with explicit runtime dependencies.
@@ -11,9 +12,15 @@ import { createFixedWindowLimiter } from "./core/rateLimit.js";
  */
 export const PREPARATION_BODY_LIMIT = "256kb";
 
-export function createApp({ redisClient, config, modelCatalog, preparationBrief } = {}) {
+export function createApp({ redisClient, config, modelCatalog, preparationBrief, wsTickets, log } = {}) {
   if (!redisClient) throw new TypeError("redisClient is required");
   if (!config) throw new TypeError("config is required");
+  const ticketStore =
+    wsTickets ??
+    createWsTicketStore({
+      redisClient,
+      ttlSeconds: Number(config.WS_TICKET_TTL_SECONDS ?? DEFAULT_WS_TICKET_TTL_SECONDS),
+    });
 
   const app = express();
   // Behind a reverse proxy (Traefik), trust exactly that many hops so req.ip
@@ -25,6 +32,16 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief 
     prefix: "rl:auth-token",
     limit: Number(config.AUTH_RATE_LIMIT_PER_MINUTE ?? 20),
     windowSeconds: 60,
+  });
+  // Keyed by the verified installation, so one device cannot exhaust tickets
+  // for others behind the same address. Runs after cookie verification.
+  const wsTicketLimiter = createFixedWindowLimiter({
+    redisClient,
+    prefix: "rl:ws-ticket",
+    limit: Number(config.WS_TICKET_RATE_LIMIT_PER_MINUTE ?? 30),
+    windowSeconds: 60,
+    keyFor: (req) => req.wsTicketOwner?.device_id,
+    log,
   });
   // Candidate contexts can exceed the 100 kB default; only this route gets more.
   app.use("/preparation", express.json({ limit: PREPARATION_BODY_LIMIT }));
@@ -97,6 +114,27 @@ export function createApp({ redisClient, config, modelCatalog, preparationBrief 
     const { claims, error } = verifyCookie(req);
     if (error) return res.status(401).json({ error });
     return res.json({ ok: true, claims });
+  });
+  function requireCookie(req, res, next) {
+    const { claims, error } = verifyCookie(req);
+    if (error) return res.status(401).json({ error });
+    if (claims.app_id !== config.APP_ID || typeof claims.device_id !== "string" || !claims.device_id) {
+      return res.status(401).json({ error: "invalid_cookie" });
+    }
+    req.wsTicketOwner = { app_id: claims.app_id, device_id: claims.device_id };
+    return next();
+  }
+  // A short-lived single-use credential for the WebSocket handshake, so the
+  // long-lived JWT is not what authenticates the socket.
+  app.post("/ws-ticket", requireCookie, wsTicketLimiter, async (req, res) => {
+    res.set("Cache-Control", "no-store");
+    try {
+      const { ticket, expiresIn } = await ticketStore.issue(req.wsTicketOwner);
+      return res.json({ ticket, expires_in: expiresIn });
+    } catch (error_) {
+      log?.warn?.(`WebSocket ticket issue failed (${error_?.code || "error"})`);
+      return res.status(503).json({ error: "ticket_unavailable" });
+    }
   });
   app.get("/models", async (req, res) => {
     const { error } = verifyCookie(req);

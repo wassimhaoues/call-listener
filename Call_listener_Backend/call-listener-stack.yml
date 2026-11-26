@@ -44,8 +44,9 @@ services:
       - "traefik.http.routers.call-api.service=call-api-svc"
       - "traefik.http.services.call-api-svc.loadbalancer.server.port=3000"
 
-      # WebSocket (WS on 4000) via HTTPS, path /ws
-      - "traefik.http.routers.call-ws.rule=Host(`call.coworky.org`) && PathPrefix(`/ws`)"
+      # WebSocket (WS on 4000) via HTTPS, path /ws (and /ws/...). Not a bare
+      # PathPrefix(`/ws`): that would also route Express's POST /ws-ticket here.
+      - "traefik.http.routers.call-ws.rule=Host(`call.coworky.org`) && (Path(`/ws`) || PathPrefix(`/ws/`))"
       - "traefik.http.routers.call-ws.entrypoints=websecure"
       - "traefik.http.routers.call-ws.tls=true"
       - "traefik.http.routers.call-ws.tls.certresolver=le"

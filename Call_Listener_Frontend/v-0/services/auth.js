@@ -8,6 +8,26 @@ const AUTH_REQUEST_TIMEOUT_MS = 10_000;
 // The backend may make one repair call, each bounded by its own deadline.
 const PREPARATION_REQUEST_TIMEOUT_MS = 50_000;
 
+// Bound for the per-connection WebSocket ticket request (like fetchModels).
+const WS_TICKET_REQUEST_TIMEOUT_MS = 5_000;
+
+// Answers meaning the server predates POST /ws-ticket, so the socket falls back
+// to the cookie: 404 from an older Express, 426 from an older deployment whose
+// proxy sends every /ws* path to the WebSocket server.
+const LEGACY_TICKET_STATUSES = new Set([404, 426]);
+
+// Tickets are opaque base64url strings (the server issues 43 characters).
+const WS_TICKET_PATTERN = /^[A-Za-z0-9_-]{16,256}$/;
+
+function parseWsTicket(raw) {
+  try {
+    const ticket = JSON.parse(raw)?.ticket;
+    return typeof ticket === "string" && WS_TICKET_PATTERN.test(ticket) ? ticket : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Timeout error classified as server_unreachable by services/authFailure.js. */
 function makeTimeoutError(label, timeoutMs) {
   return Object.assign(new Error(`${label} request timed out after ${timeoutMs} ms`), {
@@ -154,12 +174,32 @@ class AuthManager {
   }
 
   /**
-   * Return the WebSocket endpoint without exposing the bearer token to the
-   * renderer or URL logs. Chromium supplies the secure call_token cookie.
+   * Return a WebSocket URL carrying a fresh short-lived, single-use ticket
+   * (`?ticket=`) from `POST /ws-ticket`, so the long-lived JWT never
+   * authenticates the socket and never reaches the renderer. Each call (and so
+   * each reconnect attempt) gets a new ticket. Only a server without the
+   * ticket route (see LEGACY_TICKET_STATUSES) gets the plain URL, which
+   * Chromium authenticates with the call_token cookie.
    */
-  async makeSignedWsUrl() {
-    await this.getCachedTokenOrFetch();
-    return `${this._baseUrl(this.wsProtocol, this.wsPort)}/ws`;
+  async makeSignedWsUrl({ timeoutMs = WS_TICKET_REQUEST_TIMEOUT_MS } = {}) {
+    const wsUrl = `${this._baseUrl(this.wsProtocol, this.wsPort)}/ws`;
+    const request = () =>
+      this._requestJson({ path: "/ws-ticket", method: "POST", label: "WebSocket ticket", timeoutMs });
+    let response = await request();
+    if (response.statusCode === 401) {
+      // The cookie was refused (expired or re-keyed server): refresh it once.
+      await this.ensure(true);
+      response = await request();
+    }
+    if (LEGACY_TICKET_STATUSES.has(response.statusCode)) return wsUrl;
+    if (response.statusCode !== 200) {
+      throw Object.assign(new Error(`WebSocket ticket HTTP ${response.statusCode}`), {
+        statusCode: response.statusCode,
+      });
+    }
+    const ticket = parseWsTicket(response.raw);
+    if (!ticket) throw new Error("WebSocket ticket response was invalid");
+    return `${wsUrl}?ticket=${encodeURIComponent(ticket)}`;
   }
 
   /**
@@ -326,4 +366,5 @@ module.exports = {
   preparationErrorCode,
   AUTH_REQUEST_TIMEOUT_MS,
   PREPARATION_REQUEST_TIMEOUT_MS,
+  WS_TICKET_REQUEST_TIMEOUT_MS,
 };

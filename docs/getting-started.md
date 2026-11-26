@@ -56,6 +56,8 @@ OpenRouter sessions default to `MAX_INTERVIEW_COST_USD=5`, `OPENROUTER_MAX_OUTPU
 
 The optional model-backed preparation brief (OpenRouter mode only) uses `PREPARATION_DAILY_BUDGET_USD` (default `0.50` per installation per 24 hours; `0` disables it), `PREPARATION_MAX_OUTPUT_TOKENS` (default `2000`), `PREPARATION_REQUEST_TIMEOUT_MS` (default `20000`), and `PREPARATION_RATE_LIMIT_PER_MINUTE` (default `3`). It is priced with the same per-model prices. See [Backend service](backend.md#preparation-brief).
 
+WebSocket tickets: `WS_TICKET_TTL_SECONDS` (default `30`, 1–300) is how long a `POST /ws-ticket` ticket stays valid, `WS_TICKET_RATE_LIMIT_PER_MINUTE` (default `30`) limits ticket requests per installation, and `WS_ALLOW_COOKIE_AUTH` (`true` or `false`, default `true`) keeps accepting the JWT cookie or `?token=` on the socket for clients that do not use tickets yet. Tickets need Redis 6.2 or newer (`GETDEL`).
+
 `POST /auth/token` allows `AUTH_RATE_LIMIT_PER_MINUTE` (default `20`) requests per client IP per minute. Set `TRUST_PROXY_HOPS` to the number of reverse proxies in front of Express (default `0`; `1` behind Traefik) so limits apply per client.
 
 Resumable sessions (clients sending the `resume` capability) are held in process memory for `RESUME_WINDOW_MS` (default `120000`) after a disconnect, with at most `MAX_DISCONNECTED_SESSIONS_PER_OWNER` (default `3`) held per installation.
