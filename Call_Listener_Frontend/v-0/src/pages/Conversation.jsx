@@ -45,6 +45,9 @@ import {
   downloadMarkdown,
 } from "@/services/debriefMarkdown.js";
 
+const SYSTEM_AUDIO_LOST_TEXT =
+  "Interviewer audio (system output) was disconnected, so it is no longer captured. Type the interviewer's questions below; your microphone is still active.";
+
 function readStoredContext() {
   const context = localStorage.getItem("callContext");
   return context ? JSON.parse(context) : undefined;
@@ -66,6 +69,10 @@ export default function Conversation() {
     localStorage.getItem("sysLabel") || "System"
   );
   const systemAudioEnabled = localStorage.getItem("systemAudioEnabled") !== "false";
+  // The interviewer device disappeared mid-interview: that source is stopped
+  // and typed questions take over. Nothing is generated in its place.
+  const [systemAudioLost, setSystemAudioLost] = useState(false);
+  const systemAudioActive = systemAudioEnabled && !systemAudioLost;
 
   // Read synchronously by the audio path, so it cannot wait for a re-render.
   const pausedRef = useRef(false);
@@ -78,7 +85,13 @@ export default function Conversation() {
     isPaused,
     getContext: readStoredContext,
   });
-  const capture = useAudioCapture({ onChunk: socket.sendAudioChunk });
+  const handleSourceLost = useCallback((source) => {
+    if (source === "system" && mountedRef.current) setSystemAudioLost(true);
+  }, []);
+  const capture = useAudioCapture({
+    onChunk: socket.sendAudioChunk,
+    onSourceLost: handleSourceLost,
+  });
 
   function submitTypedInterviewerQuestion(question) {
     if (pausedRef.current) {
@@ -264,6 +277,7 @@ export default function Conversation() {
   const alerts = [
     state.captureError,
     state.modelUnavailable ? UNSUPPORTED_MODEL_TEXT : "",
+    systemAudioLost ? SYSTEM_AUDIO_LOST_TEXT : "",
   ].filter(Boolean);
 
   if (reviewing) {
@@ -318,7 +332,7 @@ export default function Conversation() {
               actionError={state.actionError}
               onResponseAction={requestResponseAction}
               onSubmitTypedQuestion={
-                systemAudioEnabled ? undefined : submitTypedInterviewerQuestion
+                systemAudioActive ? undefined : submitTypedInterviewerQuestion
               }
             />
           </CardBody>
@@ -340,14 +354,16 @@ export default function Conversation() {
         right={
           <div className="flex items-center gap-6">
             <Meter label={micLabel} pct={capture.levels.mic.pct} db={capture.levels.mic.db} />
-            {systemAudioEnabled ? (
+            {systemAudioActive ? (
               <Meter
                 label={sysLabel}
                 pct={capture.levels.system.pct}
                 db={capture.levels.system.db}
               />
             ) : (
-              <span className="hidden sm:block text-xs">{sysLabel}</span>
+              <span className="hidden sm:block text-xs">
+                {systemAudioLost ? "Interviewer audio disconnected" : sysLabel}
+              </span>
             )}
             <span className="hidden sm:block">
               Tip: keep peaks around –12 dB

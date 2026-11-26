@@ -51,7 +51,12 @@ describe("buildDiagnostics", () => {
     expect(result).toEqual({
       os: { family: "Linux", arch: "x64", supported: true },
       displayServer: "wayland",
-      capture: { strategy: "microphone-only", label: "Microphone only", systemAudio: false },
+      capture: {
+        strategy: "microphone-only",
+        label: "Microphone only",
+        systemAudio: false,
+        interviewerSource: { kind: "unknown", label: "Not chosen yet" },
+      },
       audioAdapter: {
         kind: "linux-app-streams",
         state: "idle",
@@ -85,6 +90,49 @@ describe("buildDiagnostics", () => {
     expect(result.capture.label).toBe("System audio and microphone (VB-Cable)");
     expect(result.errors.map((e) => e.code)).toEqual(["vb-cable-missing"]);
     expect(result.errors[0].action).toMatch(/Install VB-CABLE/);
+  });
+
+  it("reports a selected Linux monitor source by kind only", () => {
+    const result = buildDiagnostics({
+      platform: "linux",
+      capabilities: getPlatformCapabilities({ platform: "linux" }),
+      audio: linuxAudio(),
+      interviewerSource: "monitor-source",
+    });
+    expect(result.capture.interviewerSource).toEqual({
+      kind: "monitor-source",
+      label: "Monitor source selected",
+    });
+    // A chosen monitor replaces the "type the questions" note.
+    expect(result.errors.map((e) => e.code)).not.toContain("system-audio-unavailable");
+  });
+
+  it("reports microphone-only Linux sessions with the typed-question note", () => {
+    const result = buildDiagnostics({
+      platform: "linux",
+      capabilities: getPlatformCapabilities({ platform: "linux" }),
+      audio: linuxAudio(),
+      interviewerSource: "none",
+    });
+    expect(result.capture.interviewerSource).toEqual({ kind: "none", label: "None (typed questions)" });
+    expect(result.errors.map((e) => e.code)).toContain("system-audio-unavailable");
+  });
+
+  it.each([
+    "Monitor of Built-in Audio Analog Stereo",
+    "alsa_output.pci-0000_00_1f.3.analog-stereo.monitor",
+    "constructor",
+    "__proto__",
+    42,
+    { kind: "monitor-source" },
+  ])("never echoes an unknown interviewer source value (%s)", (value) => {
+    const result = buildDiagnostics({
+      platform: "linux",
+      capabilities: getPlatformCapabilities({ platform: "linux" }),
+      audio: linuxAudio(),
+      interviewerSource: value,
+    });
+    expect(result.capture.interviewerSource).toEqual({ kind: "unknown", label: "Not chosen yet" });
   });
 
   it("flags unsupported platforms", () => {

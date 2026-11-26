@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { useUI } from "@/ui/UIContext.jsx";
 import Button from "@/components/ui/Button.jsx";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card.jsx";
+import { readInterviewerSourceKind } from "@/services/interviewerSource.js";
 
 const DISPLAY_SERVER_LABELS = {
   x11: "X11",
@@ -41,7 +42,9 @@ export default function Diagnostics() {
   const load = useCallback(async () => {
     setStatus("loading");
     try {
-      const result = await window.callApi?.getDiagnostics?.();
+      const result = await window.callApi?.getDiagnostics?.({
+        interviewerSource: readInterviewerSourceKind(),
+      });
       if (result && typeof result === "object") {
         setData(result);
         setStatus("ready");
@@ -96,8 +99,12 @@ export default function Diagnostics() {
                 />
                 <Row label="Capture strategy" value={data.capture?.label ?? "Unknown"} />
                 <Row
-                  label="Interviewer audio"
+                  label="System audio route"
                   value={data.capture?.systemAudio ? "Available" : "Not available"}
+                />
+                <Row
+                  label="Interviewer source"
+                  value={data.capture?.interviewerSource?.label ?? "Not chosen yet"}
                 />
                 <Row
                   label="Audio adapter"

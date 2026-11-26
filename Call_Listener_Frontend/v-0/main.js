@@ -295,7 +295,9 @@ async function createWindow(authMgr, platformAudio, capabilities) {
   // ---- Renderer-safe APIs ----------------------------------------------------
   ipcMain.handle("auth:getWsUrl", async () => authMgr.makeSignedWsUrl());
   ipcMain.handle("platform:getCapabilities", () => capabilities);
-  ipcMain.handle("diagnostics:get", () =>
+  // The renderer may pass the interviewer source kind chosen in Setup;
+  // buildDiagnostics accepts only known enum values.
+  ipcMain.handle("diagnostics:get", (_event, request) =>
     buildDiagnostics({
       platform: process.platform,
       arch: process.arch,
@@ -304,6 +306,7 @@ async function createWindow(authMgr, platformAudio, capabilities) {
       audio: platformAudio.describe(),
       appVersion: app.getVersion(),
       electronVersion: process.versions.electron,
+      interviewerSource: request?.interviewerSource,
     })
   );
   ipcMain.handle("models:list", async () => {
