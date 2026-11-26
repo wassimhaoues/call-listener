@@ -32,6 +32,9 @@ export function createReplayHarness({
   inputUsdPerMillionTokens = 0.2,
   outputUsdPerMillionTokens = 1.2,
   requestTimeoutMs = 10_000,
+  // Replays flush streamed deltas only on completion so they stay timer-free
+  // and deterministic; time-based batching is covered by unit tests.
+  streamFlushMs = 60_000,
   sessionId = "replay-session",
 } = {}) {
   const redis = createMemoryRedis();
@@ -87,6 +90,7 @@ export function createReplayHarness({
   // The production 800 ms cooldown only delays the next generation; replays
   // assert ordering, so it is disabled to keep them fast and timer-free.
   streamManager.REPLY_COOLDOWN_MS = 0;
+  streamManager.STREAM_FLUSH_MS = streamFlushMs;
 
   const handleMessage = createMessageHandler({
     ChatHistory,
@@ -143,9 +147,14 @@ export function createReplayHarness({
   async function runStep(step) {
     const before = provider.calls.length;
     switch (step.type) {
-      case "context":
-        await sendRaw(JSON.stringify({ context: resolveContextCase(contexts, { base: step.context }) }));
+      case "context": {
+        const context = resolveContextCase(contexts, { base: step.context });
+        // `capabilities` is advertised at the context top level, as the desktop client does.
+        await sendRaw(JSON.stringify({
+          context: step.capabilities ? { ...context, capabilities: step.capabilities } : context,
+        }));
         break;
+      }
       case "audio":
         for (let index = 0; index < (step.count ?? 1); index += 1) {
           await sendRaw(JSON.stringify({ source: step.source, chunk: silentPcmChunk(step.bytes) }));
@@ -174,6 +183,15 @@ export function createReplayHarness({
         () => provider.calls.length > before && provider.pendingCount() > 0,
         `a pending provider call (${step.label || step.type})`
       );
+    }
+    if (step.waitFor === "providerStreamed") {
+      // Every scripted chunk was yielded and the stream is still open.
+      await waitUntil(() => {
+        const call = provider.calls[before];
+        const chunks = call && responses[call.name]?.chunks;
+        return call?.status === "pending" && chunks && call.chunksYielded === chunks.length;
+      }, `a streamed provider call held open (${step.label || step.type})`);
+      for (let turn = 0; turn < 5; turn += 1) await nextTurn();
     }
   }
 

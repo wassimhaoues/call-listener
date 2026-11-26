@@ -52,6 +52,20 @@
       "content": "Reliez le poste à votre expérience de pilotage de projet.",
       "usage_metadata": { "input_tokens": 980, "output_tokens": 50, "total_tokens": 1030 }
     },
+    "streamedAnswer": {
+      "kind": "stream",
+      "chunks": ["Situation: a ", "legacy billing database. ", "Action: staged dual writes.  "],
+      "usage_metadata": { "input_tokens": 1100, "output_tokens": 30, "total_tokens": 1130 }
+    },
+    "streamedMissingUsage": {
+      "kind": "stream",
+      "chunks": ["Rehearse the rollback ", "earlier."]
+    },
+    "streamThenHang": {
+      "kind": "stream",
+      "chunks": ["This partial answer ", "must never reach the client."],
+      "thenHang": true
+    },
     "lateIntro": {
       "kind": "deferred",
       "content": "This introduction arrives after the session ended."
