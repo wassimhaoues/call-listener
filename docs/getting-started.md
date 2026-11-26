@@ -56,6 +56,8 @@ OpenRouter sessions default to `MAX_INTERVIEW_COST_USD=5`, `OPENROUTER_MAX_OUTPU
 
 The optional model-backed preparation brief (OpenRouter mode only) uses `PREPARATION_DAILY_BUDGET_USD` (default `0.50` per installation per 24 hours; `0` disables it), `PREPARATION_MAX_OUTPUT_TOKENS` (default `2000`), `PREPARATION_REQUEST_TIMEOUT_MS` (default `20000`), and `PREPARATION_RATE_LIMIT_PER_MINUTE` (default `3`). It is priced with the same per-model prices. See [Backend service](backend.md#preparation-brief).
 
+`POST /auth/token` allows `AUTH_RATE_LIMIT_PER_MINUTE` (default `20`) requests per client IP per minute. Set `TRUST_PROXY_HOPS` to the number of reverse proxies in front of Express (default `0`; `1` behind Traefik) so limits apply per client.
+
 Resumable sessions (clients sending the `resume` capability) are held in process memory for `RESUME_WINDOW_MS` (default `120000`) after a disconnect, with at most `MAX_DISCONNECTED_SESSIONS_PER_OWNER` (default `3`) held per installation.
 
 For a distributable Windows installer, run `npm run build`. Do not edit `dist/`, the installer, or bundled tools in `bin/` by hand.

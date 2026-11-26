@@ -30,6 +30,8 @@ const CONFIG = {
   MAX_INTERVIEW_COST_USD: Number(process.env.MAX_INTERVIEW_COST_USD || 5),
   // How long a disconnected resume-capable session is kept for `{ resume }`.
   RESUME_WINDOW_MS: Number(process.env.RESUME_WINDOW_MS || 120_000),
+  AUTH_RATE_LIMIT_PER_MINUTE: Number(process.env.AUTH_RATE_LIMIT_PER_MINUTE || 20),
+  TRUST_PROXY_HOPS: Number(process.env.TRUST_PROXY_HOPS || 0),
   MAX_DISCONNECTED_SESSIONS_PER_OWNER: Number(process.env.MAX_DISCONNECTED_SESSIONS_PER_OWNER || 3),
   OPENROUTER_INPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_INPUT_USD_PER_MILLION_TOKENS || 0.2),
   OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS: Number(process.env.OPENROUTER_OUTPUT_USD_PER_MILLION_TOKENS || 1.2),
@@ -54,6 +56,14 @@ if (AI_PROVIDER === "groq") required.push("GROQ_API_KEY");
 if (AI_PROVIDER === "openrouter") required.push("OPENROUTER_API_KEY");
 if (!new Set(["groq", "openrouter"]).has(AI_PROVIDER)) {
   throw new Error("AI_PROVIDER must be groq or openrouter");
+}
+for (const key of ["AUTH_RATE_LIMIT_PER_MINUTE"]) {
+  if (!Number.isInteger(CONFIG[key]) || CONFIG[key] < 1) {
+    throw new Error(`${key} must be a positive integer`);
+  }
+}
+if (!Number.isInteger(CONFIG.TRUST_PROXY_HOPS) || CONFIG.TRUST_PROXY_HOPS < 0 || CONFIG.TRUST_PROXY_HOPS > 5) {
+  throw new Error("TRUST_PROXY_HOPS must be an integer between 0 and 5");
 }
 if (
   !Number.isInteger(CONFIG.MAX_DISCONNECTED_SESSIONS_PER_OWNER) ||

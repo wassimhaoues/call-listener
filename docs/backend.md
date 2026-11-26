@@ -90,6 +90,8 @@ Protocol details are in [the WebSocket contract](protocols/websocket.md#resumabl
 
 ## Authentication
 
+`POST /auth/token` is rate-limited per client IP (`AUTH_RATE_LIMIT_PER_MINUTE`, default 20, fixed 60-second window in Redis under a hashed `rl:auth-token:` key) and answers `429 { "error": "rate_limited" }` with `Retry-After`; if Redis errors the limiter fails open and logs a warning. Behind a reverse proxy set `TRUST_PROXY_HOPS` (the Compose stack uses `1` for Traefik) so the client IP, not the proxy's, is used.
+
 Tokens are signed with issuer `call-backend` and audience `call-electron`. The WebSocket server accepts the token in `?token=` or the `call_token` cookie, then verifies its audience, issuer, application ID, and device ID. Invalid connections close with code `4001`.
 
 ## Integrations and data
