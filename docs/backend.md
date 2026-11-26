@@ -9,6 +9,7 @@ The backend is an ES-module Node service in `Call_listener_Backend/server/`. `se
 | `GET /health` | Returns service and Redis client status. |
 | `POST /auth/token` | Accepts `{ "app_id", "device_id" }`; validates both, returns `{ "token", "expires_in" }`, and sets the `call_token` secure cookie. |
 | `GET /auth/me` | Validates `call_token` and returns its JWT claims. |
+| `POST /ws-ticket` | Requires a valid `call_token` cookie. Returns `{ "ticket", "expires_in" }` (`Cache-Control: no-store`): a short-lived, single-use WebSocket ticket bound to the cookie's `app_id` and `device_id`; see [Authentication](#authentication). |
 | `GET /models` | Requires a valid `call_token` cookie. Returns the allowlisted model catalog `{ provider, defaultModel, source, fetchedAt, models: [{ id, name, contextLength, pricing, availability, isDefault }] }`. |
 | `POST /preparation/brief` | Requires a valid `call_token` cookie. Generates a model-backed preparation brief from `{ context, model?, language? }`; see [Preparation brief](#preparation-brief). |
 
@@ -92,7 +93,17 @@ Protocol details are in [the WebSocket contract](protocols/websocket.md#resumabl
 
 `POST /auth/token` is rate-limited per client IP (`AUTH_RATE_LIMIT_PER_MINUTE`, default 20, fixed 60-second window in Redis under a hashed `rl:auth-token:` key) and answers `429 { "error": "rate_limited" }` with `Retry-After`; if Redis errors the limiter fails open and logs a warning. Behind a reverse proxy set `TRUST_PROXY_HOPS` (the Compose stack uses `1` for Traefik) so the client IP, not the proxy's, is used.
 
-Tokens are signed with issuer `call-backend` and audience `call-electron`. The WebSocket server accepts the token in `?token=` or the `call_token` cookie, then verifies its audience, issuer, application ID, and device ID. Invalid connections close with code `4001`.
+Tokens are signed with issuer `call-backend` and audience `call-electron`.
+
+### WebSocket tickets
+
+The long-lived JWT no longer has to authenticate the socket. Code: `services/auth/wsTicketStore.js`, shared by `createApp({ wsTickets })` and `startWebSocketServer({ wsTickets })` (wired once in `index.js`).
+
+- **Issue.** `POST /ws-ticket` verifies the `call_token` cookie like `/auth/me` (and that its `app_id` is `APP_ID`), then returns `{ "ticket": "<43 base64url chars>", "expires_in": 30 }` with `Cache-Control: no-store`. The ticket is 256 random bits; Redis stores only `wsticket:<sha256(ticket) hex>` → `{ app_id, device_id }` with `EX WS_TICKET_TTL_SECONDS` (default 30, 1–300). No cookie → `401 no_cookie`, a bad cookie → `401 invalid_cookie`, a Redis failure → `503 ticket_unavailable`. Requests are rate-limited per installation (`WS_TICKET_RATE_LIMIT_PER_MINUTE`, default 30; fixed 60-second window under a hashed `rl:ws-ticket:` key, keyed by the verified `device_id`) → `429 rate_limited` with `Retry-After`; the limiter fails open like the token limiter.
+- **Consume.** The WebSocket server reads `?ticket=` during the handshake (`verifyClient`) and deletes it atomically with `GETDEL` (Redis ≥ 6.2), so a ticket opens at most one connection even under concurrent handshakes. The stored claims become the connection owner exactly as JWT claims do (`ws.user = { device_id, app_id }`), so session ownership and `resume` checks are unchanged. Unknown, malformed, expired, reused, or foreign-app tickets close with `4001 auth_failed`; a Redis failure while consuming closes with `1011 auth_unavailable`. When `?ticket=` is present the cookie and `?token=` are ignored, so a bad ticket never falls back to the JWT.
+- **Compatibility flag.** With `WS_ALLOW_COOKIE_AUTH=true` (the default) a connection without a ticket is still authenticated by `?token=` or the `call_token` cookie, which verifies audience, issuer, application ID, and device ID as before (no credential → `4001 auth_required`, invalid → `4001 auth_failed`). With `false`, only tickets are accepted and any other connection closes with `4001 auth_required`.
+- **Turning cookie auth off.** Desktop builds that request tickets fall back to the cookie only when the server has no ticket route. Once every supported desktop release requests tickets (and the updater has rolled it out), set `WS_ALLOW_COOKIE_AUTH=false` in the deployment, then remove the cookie/`?token=` path from the socket in a later release.
+- **Logging.** Tickets and tokens are never logged; failures log only a fixed reason or an error code.
 
 ## Integrations and data
 

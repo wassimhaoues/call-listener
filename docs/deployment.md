@@ -15,7 +15,7 @@ The stack creates an internal `callnet` network and requires the external Docker
 
 ## Reverse proxy
 
-Traefik routes `https://call.coworky.org` to Express on port 3000 and `wss://call.coworky.org/ws` to the WebSocket server on port 4000. TLS is required because the auth cookie is `Secure` and desktop media access is designed for secure contexts. The labels configure HSTS, frame denial, no-sniff, no-referrer, and a 50-average/100-burst rate limit. Express additionally limits `POST /auth/token` per client IP; the stack sets `TRUST_PROXY_HOPS=1` so Express reads the client address from Traefik's `X-Forwarded-For`.
+Traefik routes `https://call.coworky.org` to Express on port 3000 and `wss://call.coworky.org/ws` (the rule matches `/ws` and `/ws/...` exactly, not every `/ws*` path, so `POST /ws-ticket` reaches Express) to the WebSocket server on port 4000. TLS is required because the auth cookie is `Secure` and desktop media access is designed for secure contexts. The labels configure HSTS, frame denial, no-sniff, no-referrer, and a 50-average/100-burst rate limit. Express additionally limits `POST /auth/token` per client IP; the stack sets `TRUST_PROXY_HOPS=1` so Express reads the client address from Traefik's `X-Forwarded-For`.
 
 ## Operational checks
 
